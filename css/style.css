@@ -257,6 +257,65 @@ textarea { resize: vertical; }
 .modal-box h3 { font-size: 16px; }
 .modal-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
+/* ===== GPS POSITION MARKER (Leaflet divIcon) ===== */
+.pos-marker {
+  width: 20px; height: 20px;
+  background: #f59e0b;
+  border: 3px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 3px #f59e0b55, 0 2px 6px rgba(0,0,0,0.3);
+}
+
+/* ===== METRO LINE ===== */
+#metro-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.metro-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+#metro-spacing-toggle {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.metro-toggle-btn {
+  padding: 4px 9px;
+  border: none;
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.metro-toggle-btn + .metro-toggle-btn {
+  border-left: 1px solid var(--border);
+}
+.metro-toggle-btn.active {
+  background: var(--accent);
+  color: #fff;
+}
+#metro-line-container {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  min-height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 0;
+}
+#metro-line-container svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
 /* ===== RESPONSIVE ===== */
 @media (max-width: 600px) {
   body { flex-direction: column; }
