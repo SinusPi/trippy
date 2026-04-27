@@ -326,6 +326,27 @@ textarea { resize: vertical; }
   height: auto;
 }
 
+/* ===== SHARE ROW (URL input + button inline) ===== */
+.input-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+.input-row input {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+}
+.share-text {
+  font-size: 11px;
+  font-family: monospace;
+  resize: none;
+}
+.share-text-label {
+  font-size: 11px;
+  color: var(--muted);
+}
+
 /* ===== RESPONSIVE ===== */
 @media (max-width: 600px) {
   body { flex-direction: column; }

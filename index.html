@@ -34,6 +34,7 @@
       <h2>Trips</h2>
       <ul id="trip-list"></ul>
       <button id="btn-new-trip" class="action-btn full-width">+ New Trip</button>
+      <button id="btn-import-text" class="action-btn secondary full-width">📋 Import from text…</button>
     </section>
 
     <section id="trip-edit-section" class="hidden">
@@ -138,6 +139,42 @@
       <button id="wp-modal-save"   class="action-btn">Save</button>
       <button id="wp-modal-cancel" class="action-btn secondary">Cancel</button>
       <button id="wp-modal-delete" class="action-btn danger">Delete</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SHARE TRIP MODAL ===== -->
+<div id="share-modal" class="modal hidden">
+  <div class="modal-box">
+    <h3>Share Trip</h3>
+    <label>Share link
+      <div class="input-row">
+        <input id="share-url-input" type="text" readonly>
+        <button id="btn-copy-url" class="action-btn secondary">Copy</button>
+      </div>
+    </label>
+    <p id="share-url-note" class="hint hidden">⚠️ This URL is long and may not work everywhere. Use "Copy text" to share instead.</p>
+    <label>Share as text <span class="share-text-label">(paste into a message or email)</span>
+      <textarea id="share-text-input" rows="3" readonly class="share-text"></textarea>
+    </label>
+    <div class="modal-actions">
+      <button id="btn-copy-text" class="action-btn">📋 Copy text</button>
+      <button id="share-modal-close" class="action-btn secondary">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== IMPORT FROM TEXT MODAL ===== -->
+<div id="import-text-modal" class="modal hidden">
+  <div class="modal-box">
+    <h3>Import Trip from Text</h3>
+    <p class="hint">Paste trip data shared by someone else (text or URL).</p>
+    <label>
+      <textarea id="import-text-input" rows="5" placeholder="Paste trip data here…" class="share-text"></textarea>
+    </label>
+    <div class="modal-actions">
+      <button id="btn-import-text-go" class="action-btn">Import</button>
+      <button id="btn-import-text-cancel" class="action-btn secondary">Cancel</button>
     </div>
   </div>
 </div>
