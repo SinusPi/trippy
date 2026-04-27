@@ -47,11 +47,14 @@ function saveTrips(trips) {
 
 /**
  * Encode a trip as a base64 string suitable for use in a URL query parameter.
- * Uses unescape/encodeURIComponent to handle non-ASCII characters in names/descriptions.
+ * Uses TextEncoder to correctly handle multi-byte (non-ASCII) characters.
  */
 function encodeTripForUrl(trip) {
-  const data = { name: trip.name, waypoints: trip.waypoints };
-  return btoa(unescape(encodeURIComponent(JSON.stringify(data))));
+  const data  = { name: trip.name, waypoints: trip.waypoints };
+  const bytes = new TextEncoder().encode(JSON.stringify(data));
+  let binary  = '';
+  bytes.forEach(b => { binary += String.fromCharCode(b); });
+  return btoa(binary);
 }
 
 /**
@@ -60,7 +63,10 @@ function encodeTripForUrl(trip) {
  */
 function decodeTripFromParam(param) {
   try {
-    return JSON.parse(decodeURIComponent(escape(atob(param))));
+    const binary = atob(param);
+    const bytes  = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return JSON.parse(new TextDecoder().decode(bytes));
   } catch (e) {
     return null;
   }
@@ -157,7 +163,13 @@ function doImport(name, existingId) {
     const existing = trips.find(t => t.id === existingId);
     if (existing) {
       existing.name = name;
-      existing.waypoints = data.waypoints.map(w => ({ ...w, id: uid() }));
+      existing.waypoints = data.waypoints.map(w => ({
+        id:   uid(),
+        lat:  typeof w.lat  === 'number' ? w.lat  : 0,
+        lng:  typeof w.lng  === 'number' ? w.lng  : 0,
+        name: typeof w.name === 'string' ? w.name : '',
+        desc: typeof w.desc === 'string' ? w.desc : '',
+      }));
       saveTrips(trips);
       renderTripList();
       $('#import-modal').addClass('hidden');
@@ -169,7 +181,13 @@ function doImport(name, existingId) {
   const trip = {
     id:        uid(),
     name,
-    waypoints: data.waypoints.map(w => ({ ...w, id: uid() })),
+    waypoints: data.waypoints.map(w => ({
+      id:   uid(),
+      lat:  typeof w.lat  === 'number' ? w.lat  : 0,
+      lng:  typeof w.lng  === 'number' ? w.lng  : 0,
+      name: typeof w.name === 'string' ? w.name : '',
+      desc: typeof w.desc === 'string' ? w.desc : '',
+    })),
   };
   trips.push(trip);
   saveTrips(trips);
