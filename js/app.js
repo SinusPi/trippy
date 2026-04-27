@@ -94,74 +94,80 @@ let driveNearestMarker  = null;
  *   distFromPath    – perpendicular distance from position to path (m)
  *   cumDist         – array of cumulative distances to each waypoint
  *   upcomingIndices – waypoint indices whose cumDist > distAlong
+ *
+ * Uses turf.js for accurate geospatial nearest-point calculations on great-circle paths.
  */
 function nearestOnPath(posLatLng, waypoints) {
   if (!waypoints || waypoints.length < 2) return null;
 
-  const pts = waypoints.map(w => [w.lat, w.lng]);
-  const n   = pts.length;
+  const n = waypoints.length;
 
-  // Cumulative distances to each waypoint
+  // Cumulative distances to each waypoint (using haversine for accuracy)
   const segLengths = [];
   const cumDist    = [0];
   for (let i = 0; i < n - 1; i++) {
-    const d = haversine(pts[i], pts[i + 1]);
+    const d = haversine(
+      [waypoints[i].lat, waypoints[i].lng],
+      [waypoints[i + 1].lat, waypoints[i + 1].lng]
+    );
     segLengths.push(d);
     cumDist.push(cumDist[i] + d);
   }
   const totalDist = cumDist[n - 1];
 
-  // Find segment with minimum perpendicular distance
-  let bestDist = Infinity;
-  let bestSeg  = 0;
-  let bestT    = 0;
+  // Build a GeoJSON LineString (turf.js uses [lng, lat] order)
+  const lineCoords = waypoints.map(w => [w.lng, w.lat]);
+  const line = turf.lineString(lineCoords);
+  const point = turf.point([posLatLng.lng, posLatLng.lat]);
 
-  const pLat = posLatLng.lat;
-  const pLng = posLatLng.lng;
+  // Find the nearest point on the line using turf.js
+  const nearest = turf.nearestPointOnLine(line, point);
+  const distFromPath = nearest.properties.dist * 1000; // turf returns km, convert to metres
 
-  for (let i = 0; i < n - 1; i++) {
-    const [aLat, aLng] = pts[i];
-    const [bLat, bLng] = pts[i + 1];
-    const dx = bLat - aLat;
-    const dy = bLng - aLng;
+  // Determine which segment the nearest point lies on
+  let bestSeg = 0;
+  let bestT   = 0;
+  let distAlong = 0;
+
+  // nearest.properties.index tells us which segment
+  if (nearest.properties.index !== undefined) {
+    bestSeg = Math.min(nearest.properties.index || 0, n - 2);
+    // Calculate t within the segment using the location property
+    const nearestCoords = nearest.geometry.coordinates;
+    const segStart = lineCoords[bestSeg];
+    const segEnd = lineCoords[bestSeg + 1];
+
+    // Calculate parametric t by projecting nearest onto segment
+    const [sx, sy] = segStart;
+    const [ex, ey] = segEnd;
+    const [nx, ny] = nearestCoords;
+
+    const dx = ex - sx;
+    const dy = ey - sy;
     const lenSq = dx * dx + dy * dy;
 
-    let t = 0;
     if (lenSq > 0) {
-      t = ((pLat - aLat) * dx + (pLng - aLng) * dy) / lenSq;
-      t = Math.max(0, Math.min(1, t));
+      bestT = ((nx - sx) * dx + (ny - sy) * dy) / lenSq;
+      bestT = Math.max(0, Math.min(1, bestT));
     }
 
-    const nLat = aLat + t * dx;
-    const nLng = aLng + t * dy;
-    const d    = haversine([pLat, pLng], [nLat, nLng]);
-
-    if (d < bestDist) {
-      bestDist = d;
-      bestSeg  = i;
-      bestT    = t;
-    }
+    // Calculate distance along path up to this point
+    distAlong = cumDist[bestSeg] + bestT * segLengths[bestSeg];
   }
-
-  const [aLat, aLng] = pts[bestSeg];
-  const [bLat, bLng] = pts[bestSeg + 1];
-  const nearestLat   = aLat + bestT * (bLat - aLat);
-  const nearestLng   = aLng + bestT * (bLng - aLng);
-  const distAlong    = cumDist[bestSeg] + bestT * segLengths[bestSeg];
 
   // Waypoints whose cumulative distance is strictly ahead of our position
   const upcomingIndices = [];
   for (let i = 1; i < n; i++) {
-    if (cumDist[i] > distAlong + WAYPOINT_PROXIMITY_THRESHOLD) upcomingIndices.push(i);
+    if (cumDist[i] > distAlong + WAYPOINT_PROXIMITY_THRESHOLD && waypoints[i].name) upcomingIndices.push(i);
   }
 
   return {
-    nearestLatLng:  L.latLng(nearestLat, nearestLng),
+    nearestLatLng:  L.latLng(nearest.geometry.coordinates[1], nearest.geometry.coordinates[0]),
     distAlong,
     totalDist,
     segIdx:         bestSeg,
     segT:           bestT,
-    distFromPath:   bestDist,
+    distFromPath:   distFromPath,
     cumDist,
     upcomingIndices,
   };
