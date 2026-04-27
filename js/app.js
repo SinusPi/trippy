@@ -393,11 +393,12 @@ function startDrive() {
   const trip = trips.find(t => t.id === tripId);
   if (!trip || trip.waypoints.length < 2) return;
 
-  driveState = { tripId, watchId: null, posLatLng: null, lastInfo: null };
+  driveState = { tripId, watchId: null, posLatLng: null, lastInfo: null, testMode: false };
 
   $('#trip-select-section').addClass('hidden');
   $('#drive-status-section').removeClass('hidden');
   $('#drive-trip-name').text(trip.name || 'Unnamed Trip');
+  $('#btn-test-mode').text('🧪 Test mode: Off').addClass('secondary');
   $('#gps-label').text('Acquiring GPS…');
   $('#progress-card').addClass('hidden');
   $('#upcoming-waypoints').addClass('hidden');
@@ -428,14 +429,17 @@ function stopDrive() {
   driveState = null;
   clearDriveLayers();
 
+  $('#btn-test-mode').text('🧪 Test mode: Off').addClass('secondary');
   $('#drive-status-section').addClass('hidden');
   $('#trip-select-section').removeClass('hidden');
   $('#metro-section').addClass('hidden');
   $('#metro-line-container').empty();
 }
 
-function onGpsUpdate(geoPos) {
+function onGpsUpdate(geoPos, fromTest = false) {
   if (!driveState) return;
+  // When test mode is active, ignore real GPS updates so the test position sticks
+  if (driveState.testMode && !fromTest) return;
   const trip = trips.find(t => t.id === driveState.tripId);
   if (!trip) return;
 
@@ -444,10 +448,17 @@ function onGpsUpdate(geoPos) {
 
   // ── GPS label
   const acc = geoPos.coords.accuracy;
-  $('#gps-label').html(
-    `${posLL.lat.toFixed(5)}, ${posLL.lng.toFixed(5)} ` +
-    `<small style="color:var(--muted)">±${Math.round(acc)}\u202fm</small>`,
-  );
+  if (fromTest) {
+    $('#gps-label').html(
+      `<span class="test-badge">🧪</span> ` +
+      `${posLL.lat.toFixed(5)}, ${posLL.lng.toFixed(5)}`,
+    );
+  } else {
+    $('#gps-label').html(
+      `${posLL.lat.toFixed(5)}, ${posLL.lng.toFixed(5)} ` +
+      `<small style="color:var(--muted)">±${Math.round(acc)}\u202fm</small>`,
+    );
+  }
 
   // ── Position marker on map
   if (!drivePosMarker) {
@@ -506,6 +517,20 @@ function onGpsUpdate(geoPos) {
 
   // ── Metro line
   renderMetroLine(trip, info);
+}
+
+/**
+ * Simulates a GPS position update from a map click in test mode.
+ * Constructs a synthetic position object and forwards it to onGpsUpdate.
+ */
+function onTestPositionClick(latlng) {
+  if (!driveState || !driveState.testMode) return;
+  onGpsUpdate({
+    coords: {
+      latitude: latlng.lat, longitude: latlng.lng, accuracy: 0,
+      altitude: null, altitudeAccuracy: null, heading: null, speed: null,
+    },
+  }, true);
 }
 
 // ═══════════════════════════════════════════
@@ -744,6 +769,11 @@ $(function () {
 
   // ── Edit — click map to add waypoint ──────────────────────
   map.on('click', e => {
+    // In drive test mode, a click repositions the simulated GPS location
+    if (mode === 'drive' && driveState && driveState.testMode) {
+      onTestPositionClick(e.latlng);
+      return;
+    }
     if (mode !== 'edit' || !editTripId) return;
     const trip = getEditTrip();
     if (!trip) return;
@@ -772,6 +802,19 @@ $(function () {
 
   $('#btn-start-drive').on('click', startDrive);
   $('#btn-stop-drive').on('click',  stopDrive);
+
+  // ── Drive — test mode ─────────────────────────────────────
+  $('#btn-test-mode').on('click', function () {
+    if (!driveState) return;
+    driveState.testMode = !driveState.testMode;
+    if (driveState.testMode) {
+      $(this).text('🧪 Test mode: On').removeClass('secondary');
+      $('#gps-label').text('Click the map to set a test position…');
+    } else {
+      $(this).text('🧪 Test mode: Off').addClass('secondary');
+      $('#gps-label').text('Acquiring GPS…');
+    }
+  });
 
   // ── Metro spacing toggle ──────────────────────────────────
   $('#btn-metro-proportional').on('click', function () {

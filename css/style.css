@@ -216,6 +216,9 @@ textarea { resize: vertical; }
 #gps-status .label { font-size: 12px; color: var(--muted); }
 #gps-status .value { font-size: 13px; font-weight: 500; }
 
+/* Test mode badge inside GPS label */
+.test-badge { font-size: 12px; }
+
 /* Upcoming waypoints list */
 .upcoming-item {
   padding: 8px 10px;
