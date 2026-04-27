@@ -204,7 +204,7 @@ function renderEditMap(rezoom=true) {
       saveTrips(trips);
       renderWaypointList();
       renderEditMap(false);
-      openWaypointModal(wp.id);
+      //openWaypointModal(wp.id);
     });
   }
 
@@ -797,7 +797,7 @@ $(function () {
     saveTrips(trips);
     renderWaypointList();
     renderEditMap(false); // don't rezoom when adding a new waypoint
-    openWaypointModal(wp.id);
+    //openWaypointModal(wp.id);
   });
 
   // ── Waypoint modal ────────────────────────────────────────
