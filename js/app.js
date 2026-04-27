@@ -192,6 +192,20 @@ function renderEditMap() {
     editPolyline = L.polyline(lls, {
       color: '#2563eb', weight: 4, opacity: 0.8,
     }).addTo(map);
+
+    editPolyline.on('click', e => {
+      L.DomEvent.stopPropagation(e);
+      const trip = getEditTrip();
+      if (!trip) return;
+      const info = nearestOnPath(e.latlng, trip.waypoints);
+      if (!info) return;
+      const wp = { id: uid(), lat: info.nearestLatLng.lat, lng: info.nearestLatLng.lng, name: '', desc: '' };
+      trip.waypoints.splice(info.segIdx + 1, 0, wp);
+      saveTrips(trips);
+      renderWaypointList();
+      renderEditMap();
+      openWaypointModal(wp.id);
+    });
   }
 
   trip.waypoints.forEach((wp, idx) => {
