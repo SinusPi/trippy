@@ -86,7 +86,7 @@ function exportCurrentTrip() {
   const trip = getEditTrip();
   if (!trip) return;
   const url = buildExportUrl(trip);
-  if (navigator.clipboard && navigator.clipboard.writeText) {
+  if (window.isSecureContext && navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(url).then(() => {
       alert('Share URL copied to clipboard!');
     }).catch(() => {
@@ -140,9 +140,6 @@ function importTripFromUrl() {
     return;
   }
 
-  // Strip the query string from the address bar only after validation succeeds.
-  window.history.replaceState({}, '', window.location.pathname);
-
   const n = data.waypoints.length;
   const existing = trips.find(t => t.name === data.name);
   const renamedTo = uniqueTripName(data.name);
@@ -171,6 +168,9 @@ function importTripFromUrl() {
 function doImport(name, existingId) {
   const data = pendingImport.data;
   pendingImport = null;
+
+  // Strip the query string from the address bar now that the user has confirmed.
+  window.history.replaceState({}, '', window.location.pathname);
 
   if (existingId) {
     // Overwrite: replace waypoints (and name) of the existing trip, keep its id.
