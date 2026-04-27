@@ -175,7 +175,9 @@ textarea { resize: vertical; }
 }
 .wp-item:hover { background: #dbeafe; }
 .wp-item .wp-num  { font-size: 11px; color: var(--muted); min-width: 18px; }
-.wp-item .wp-name { flex: 1; font-size: 13px; }
+.wp-item .wp-info { flex: 1; display: flex; flex-direction: column; gap: 1px; }
+.wp-item .wp-name { font-size: 13px; }
+.wp-item .wp-desc { font-size: 11px; color: var(--muted); }
 .wp-item .wp-coords { font-size: 10px; color: var(--muted); }
 
 /* Hint */
