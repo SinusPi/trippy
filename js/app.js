@@ -42,6 +42,164 @@ function saveTrips(trips) {
 }
 
 // ═══════════════════════════════════════════
+// EXPORT / IMPORT
+// ═══════════════════════════════════════════
+
+/**
+ * Encode a trip as a base64 string suitable for use in a URL query parameter.
+ * Uses TextEncoder to correctly handle multi-byte (non-ASCII) characters.
+ */
+function encodeTripForUrl(trip) {
+  const data  = { name: trip.name, waypoints: trip.waypoints };
+  const bytes = new TextEncoder().encode(JSON.stringify(data));
+  let binary  = '';
+  bytes.forEach(b => { binary += String.fromCharCode(b); });
+  return btoa(binary);
+}
+
+/**
+ * Decode a trip from a base64 URL parameter produced by encodeTripForUrl().
+ * Returns the parsed object or null on failure.
+ */
+function decodeTripFromParam(param) {
+  try {
+    const binary = atob(param);
+    const bytes  = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return JSON.parse(new TextDecoder().decode(bytes));
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Build a shareable URL for the given trip.
+ */
+function buildExportUrl(trip) {
+  return window.location.origin + window.location.pathname + '?trip=' + encodeTripForUrl(trip);
+}
+
+/**
+ * Export the currently-edited trip by copying a shareable URL to the clipboard.
+ */
+function exportCurrentTrip() {
+  const trip = getEditTrip();
+  if (!trip) return;
+  const url = buildExportUrl(trip);
+  if (window.isSecureContext && navigator.clipboard) {
+    navigator.clipboard.writeText(url).then(() => {
+      alert('Share URL copied to clipboard!');
+    }).catch(() => {
+      prompt('Copy this URL to share the trip:', url);
+    });
+  } else {
+    prompt('Copy this URL to share the trip:', url);
+  }
+}
+
+/**
+ * Return a trip name that does not conflict with any existing trip name.
+ * If baseName already exists, appends -1, -2, … until unique.
+ */
+function uniqueTripName(baseName) {
+  const names = new Set(trips.map(t => t.name));
+  if (!names.has(baseName)) return baseName;
+  let i = 1;
+  while (names.has(baseName + '-' + i)) i += 1;
+  return baseName + '-' + i;
+}
+
+/**
+ * Validate and extract only the expected fields from an imported waypoint object.
+ * A fresh ID is always generated for each waypoint to prevent ID collisions.
+ */
+function sanitizeWaypoint(w) {
+  return {
+    id:   uid(),
+    lat:  typeof w.lat  === 'number' ? w.lat  : 0,
+    lng:  typeof w.lng  === 'number' ? w.lng  : 0,
+    name: typeof w.name === 'string' ? w.name : '',
+    desc: typeof w.desc === 'string' ? w.desc : '',
+  };
+}
+
+/** Pending import data while the import modal is open. */
+let pendingImport = null;
+
+/**
+ * Check the current URL for a ?trip= parameter.  If found, decode the trip
+ * and open the import-confirmation modal so the user can decide what to do.
+ */
+function importTripFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const encoded = params.get('trip');
+  if (!encoded) return;
+
+  const data = decodeTripFromParam(encoded);
+  if (!data || typeof data.name !== 'string' || !data.name.trim() ||
+      !Array.isArray(data.waypoints) || data.waypoints.length === 0) {
+    alert('Could not read the trip from the URL – the link may be invalid or corrupted.');
+    return;
+  }
+
+  const n = data.waypoints.length;
+  const existing = trips.find(t => t.name === data.name);
+  const renamedTo = uniqueTripName(data.name);
+  pendingImport = { data, existing, renamedTo };
+
+  if (existing) {
+    $('#import-modal-desc').text(
+      `A trip named "${data.name}" (${n} waypoint${n !== 1 ? 's' : ''}) already exists in your list.`
+    );
+    $('#import-modal-add').hide();
+    $('#import-modal-overwrite').show().text(`Overwrite "${existing.name}"`);
+    $('#import-modal-rename').show().text(`Import as "${renamedTo}"`);
+  } else {
+    $('#import-modal-desc').text(
+      `Import trip "${data.name}" with ${n} waypoint${n !== 1 ? 's' : ''}?`
+    );
+    $('#import-modal-add').show();
+    $('#import-modal-overwrite').hide();
+    $('#import-modal-rename').hide();
+  }
+
+  $('#import-modal').removeClass('hidden');
+}
+
+/** Perform the actual import once the user has confirmed their choice. */
+function doImport(name, existingId) {
+  const data = pendingImport.data;
+  pendingImport = null;
+
+  // Strip the query string from the address bar now that the user has confirmed.
+  window.history.replaceState({}, '', window.location.pathname);
+
+  if (existingId) {
+    // Overwrite: replace waypoints (and name) of the existing trip, keep its id.
+    const existing = trips.find(t => t.id === existingId);
+    if (existing) {
+      existing.name = name;
+      existing.waypoints = data.waypoints.map(sanitizeWaypoint);
+      saveTrips(trips);
+      renderTripList();
+      $('#import-modal').addClass('hidden');
+      return;
+    }
+  }
+
+  // New trip
+  const trip = {
+    id:        uid(),
+    name,
+    waypoints: data.waypoints.map(sanitizeWaypoint),
+  };
+  trips.push(trip);
+  saveTrips(trips);
+  renderTripList();
+  $('#import-modal').addClass('hidden');
+}
+
+// ═══════════════════════════════════════════
 // APPLICATION STATE
 // ═══════════════════════════════════════════
 
@@ -771,6 +929,38 @@ $(function () {
     openTripEdit(trip.id);
   });
 
+  // ── Edit — export trip ────────────────────────────────────
+  $('#btn-export-trip').on('click', exportCurrentTrip);
+
+  // ── Import modal ──────────────────────────────────────────
+  $('#import-modal-add').on('click', () => {
+    if (!pendingImport) return;
+    doImport(pendingImport.data.name, null);
+  });
+
+  $('#import-modal-overwrite').on('click', () => {
+    if (!pendingImport || !pendingImport.existing) return;
+    doImport(pendingImport.data.name, pendingImport.existing.id);
+  });
+
+  $('#import-modal-rename').on('click', () => {
+    if (!pendingImport) return;
+    doImport(pendingImport.renamedTo, null);
+  });
+
+  $('#import-modal-cancel').on('click', () => {
+    pendingImport = null;
+    $('#import-modal').addClass('hidden');
+  });
+
+  // Click outside the import modal box to dismiss
+  $('#import-modal').on('click', function (e) {
+    if ($(e.target).is('#import-modal')) {
+      pendingImport = null;
+      $('#import-modal').addClass('hidden');
+    }
+  });
+
   // ── Edit — back / delete ───────────────────────────────────
   $('#btn-back-to-list').on('click', closeTripEdit);
 
@@ -860,4 +1050,5 @@ $(function () {
 
   // ── Initialise ────────────────────────────────────────────
   renderTripList();
+  importTripFromUrl();
 });

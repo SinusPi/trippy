@@ -40,6 +40,7 @@
       <div class="section-header">
         <button id="btn-back-to-list" class="icon-btn" title="Back">◀</button>
         <h2 id="trip-edit-title">Edit Trip</h2>
+        <button id="btn-export-trip" class="icon-btn" title="Share trip URL">📤</button>
         <button id="btn-delete-trip" class="icon-btn danger" title="Delete trip">🗑</button>
       </div>
 
@@ -137,6 +138,20 @@
       <button id="wp-modal-delete" class="action-btn danger">Delete</button>
       <button id="wp-modal-cancel" class="action-btn secondary">Cancel</button>
       <button id="wp-modal-save"   class="action-btn">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== IMPORT TRIP MODAL ===== -->
+<div id="import-modal" class="modal hidden">
+  <div class="modal-box">
+    <h3>Import Trip</h3>
+    <p id="import-modal-desc" style="font-size:13px;color:var(--muted)"></p>
+    <div class="modal-actions" id="import-modal-actions">
+      <button id="import-modal-add"       class="action-btn">Import</button>
+      <button id="import-modal-overwrite" class="action-btn danger" style="display:none">Overwrite</button>
+      <button id="import-modal-rename"    class="action-btn secondary" style="display:none">Rename</button>
+      <button id="import-modal-cancel"    class="action-btn secondary">Cancel</button>
     </div>
   </div>
 </div>
