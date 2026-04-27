@@ -368,6 +368,7 @@ function renderDriveMap(trip) {
   }
 
   trip.waypoints.forEach((wp, idx) => {
+    if (!wp.name) return; // skip unnamed waypoints to reduce clutter
     const m = L.circleMarker([wp.lat, wp.lng], {
       radius:      7,
       color:       '#1d4ed8',
@@ -664,6 +665,8 @@ function renderMetroLine(trip, info) {
   fractions.forEach((frac, idx) => {
     const cx      = PAD_H + TRACK_W * frac;
     const passed  = isPassed(idx);
+
+    if (!wps[idx].name) return; // skip dots and labels for unnamed waypoints to reduce clutter
 
     // Dot
     svg.appendChild(el('circle', {
