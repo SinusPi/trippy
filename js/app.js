@@ -181,7 +181,7 @@ function clearEditLayers() {
   if (editPolyline) { map.removeLayer(editPolyline); editPolyline = null; }
 }
 
-function renderEditMap() {
+function renderEditMap(rezoom=true) {
   clearEditLayers();
   const trip = getEditTrip();
   if (!trip) return;
@@ -203,7 +203,7 @@ function renderEditMap() {
       trip.waypoints.splice(info.segIdx + 1, 0, wp);
       saveTrips(trips);
       renderWaypointList();
-      renderEditMap();
+      renderEditMap(false);
       openWaypointModal(wp.id);
     });
   }
@@ -224,7 +224,7 @@ function renderEditMap() {
       wp.lat = ll.lat;
       wp.lng = ll.lng;
       saveTrips(trips);
-      renderEditMap();
+      renderEditMap(false); // don't rezoom when dragging a waypoint
       renderWaypointList();
     });
 
@@ -232,7 +232,8 @@ function renderEditMap() {
     editMarkers.push(marker);
   });
 
-  if (lls.length > 0) {
+  // rezoom
+  if (rezoom && lls.length > 0) {
     map.fitBounds(L.latLngBounds(lls).pad(0.2));
   }
 }
@@ -284,7 +285,7 @@ function openTripEdit(id) {
   $('#trip-edit-title').text(trip.name || 'Unnamed Trip');
   $('#trip-name-input').val(trip.name || '');
   renderWaypointList();
-  renderEditMap();
+  renderEditMap(true); // DO rezoom when opening a trip, to frame all its waypoints nicely
 }
 
 function closeTripEdit() {
@@ -329,7 +330,7 @@ function saveWaypointModal() {
   wp.desc = $('#wp-desc-input').val().trim();
   saveTrips(trips);
   renderWaypointList();
-  renderEditMap();
+  renderEditMap(false); // don't rezoom when editing waypoint details
   closeWaypointModal();
 }
 
@@ -339,7 +340,7 @@ function deleteWaypointInModal() {
   trip.waypoints = trip.waypoints.filter(w => w.id !== wpModalId);
   saveTrips(trips);
   renderWaypointList();
-  renderEditMap();
+  renderEditMap(false);
   closeWaypointModal();
 }
 
@@ -795,7 +796,7 @@ $(function () {
     trip.waypoints.push(wp);
     saveTrips(trips);
     renderWaypointList();
-    renderEditMap();
+    renderEditMap(false); // don't rezoom when adding a new waypoint
     openWaypointModal(wp.id);
   });
 
