@@ -557,9 +557,14 @@ function renderMetroLine(trip, info) {
   const SVG_H   = 106;  // total SVG height
   const DIST_LABEL_Y = TRACK_Y + DOT_R + 13; // y for inter-segment distance labels
 
-  // Progress fraction (0–1) along the track for current position
+  // Progress fraction (0–1) along the track for current position.
+  // In even mode the visual segments are equal-width, so we map the GPS
+  // position using the segment index + intra-segment parameter rather than
+  // the raw distance ratio.
   const progressFrac = info
-    ? (info.totalDist > 0 ? info.distAlong / info.totalDist : 0)
+    ? (metroProp
+        ? (info.totalDist > 0 ? info.distAlong / info.totalDist : 0)
+        : (n > 1 ? (info.segIdx + info.segT) / (n - 1) : 0))
     : null;
 
   // Has a waypoint been passed?
