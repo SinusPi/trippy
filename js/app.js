@@ -86,7 +86,7 @@ function exportCurrentTrip() {
   const trip = getEditTrip();
   if (!trip) return;
   const url = buildExportUrl(trip);
-  if (window.isSecureContext && navigator.clipboard && navigator.clipboard.writeText) {
+  if (window.isSecureContext && navigator.clipboard) {
     navigator.clipboard.writeText(url).then(() => {
       alert('Share URL copied to clipboard!');
     }).catch(() => {
@@ -111,6 +111,7 @@ function uniqueTripName(baseName) {
 
 /**
  * Validate and extract only the expected fields from an imported waypoint object.
+ * A fresh ID is always generated for each waypoint to prevent ID collisions.
  */
 function sanitizeWaypoint(w) {
   return {
@@ -135,7 +136,8 @@ function importTripFromUrl() {
   if (!encoded) return;
 
   const data = decodeTripFromParam(encoded);
-  if (!data || typeof data.name !== 'string' || !Array.isArray(data.waypoints)) {
+  if (!data || typeof data.name !== 'string' || !data.name.trim() ||
+      !Array.isArray(data.waypoints) || data.waypoints.length === 0) {
     alert('Could not read the trip from the URL – the link may be invalid or corrupted.');
     return;
   }
