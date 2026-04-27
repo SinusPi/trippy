@@ -33,27 +33,103 @@ function saveTrips(trips) {
 // ═══════════════════════════════════════════
 
 /**
- * Encode a trip as a base64 string suitable for use in a URL query parameter.
- * Uses TextEncoder to correctly handle multi-byte (non-ASCII) characters.
+ * Decode a compact (v2) trip object { n, w } into the standard { name, waypoints } shape.
  */
-function encodeTripForUrl(trip) {
-  const data  = { name: trip.name, waypoints: trip.waypoints };
-  const bytes = new TextEncoder().encode(JSON.stringify(data));
-  let binary  = '';
-  bytes.forEach(b => { binary += String.fromCharCode(b); });
-  return btoa(binary);
+function decodeCompactTrip(compact) {
+  if (!compact || typeof compact.n !== 'string' || !Array.isArray(compact.w)) return null;
+  return {
+    name: compact.n,
+    waypoints: compact.w.map(item => {
+      if (!Array.isArray(item) || item.length < 2) return null;
+      return {
+        lat:  typeof item[0] === 'number' ? item[0] : 0,
+        lng:  typeof item[1] === 'number' ? item[1] : 0,
+        name: typeof item[2] === 'string' ? item[2] : '',
+        desc: typeof item[3] === 'string' ? item[3] : '',
+      };
+    }).filter(Boolean),
+  };
 }
 
 /**
- * Decode a trip from a base64 URL parameter produced by encodeTripForUrl().
- * Returns the parsed object or null on failure.
+ * Build a compact JSON string for a trip (v2 format).
+ * Waypoints are encoded as arrays [lat, lng, name, desc] to minimise size.
+ * Coordinates are rounded to 5 decimal places (~1 m precision).
+ */
+function encodeTripCompact(trip) {
+  return JSON.stringify({
+    n: trip.name,
+    w: trip.waypoints.map(wp => [
+      parseFloat(wp.lat.toFixed(5)),
+      parseFloat(wp.lng.toFixed(5)),
+      wp.name || '',
+      wp.desc || '',
+    ]),
+  });
+}
+
+/**
+ * Encode a trip as a URL-safe base64url string (v2 compact format).
+ * Produces roughly half the bytes of the old verbose JSON base64 encoding.
+ */
+function encodeTripForUrl(trip) {
+  const bytes  = new TextEncoder().encode(encodeTripCompact(trip));
+  let binary   = '';
+  bytes.forEach(b => { binary += String.fromCharCode(b); });
+  // base64url: replace '+' → '-', '/' → '_', strip '=' padding
+  return 'v2_' + btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+/**
+ * Decode a trip from a URL parameter.
+ * Supports the current compact base64url (v2) format and the legacy base64-JSON format.
+ * Returns the parsed { name, waypoints } object, or null on failure.
  */
 function decodeTripFromParam(param) {
   try {
-    const binary = atob(param);
+    if (param.startsWith('v2_')) {
+      // Compact format: base64url-encoded compact JSON
+      const b64    = param.slice(3).replace(/-/g, '+').replace(/_/g, '/');
+      const binary = atob(b64);
+      const bytes  = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      return decodeCompactTrip(JSON.parse(new TextDecoder().decode(bytes)));
+    }
+    // Legacy format: plain base64-encoded full JSON.
+    // URLSearchParams decodes '+' as space, so restore before calling atob().
+    const fixed  = param.replace(/ /g, '+');
+    const binary = atob(fixed);
     const bytes  = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
     return JSON.parse(new TextDecoder().decode(bytes));
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Decode a trip from pasted plain text.
+ * Accepts the compact v2 JSON format, the legacy full-JSON format, or a
+ * full share URL (so users can paste either the text or the URL into the box).
+ * Returns the parsed { name, waypoints } object, or null on failure.
+ */
+function decodeTripFromText(text) {
+  const trimmed = text.trim();
+  // If the text looks like a URL, extract the trip param and decode it.
+  if (trimmed.includes('?trip=') || trimmed.includes('&trip=')) {
+    try {
+      const url     = new URL(trimmed);
+      const encoded = url.searchParams.get('trip');
+      if (encoded) return decodeTripFromParam(encoded);
+    } catch (e) { /* fall through */ }
+  }
+  // Otherwise try parsing as JSON (compact v2 or legacy).
+  try {
+    const obj = JSON.parse(trimmed);
+    if (!obj) return null;
+    if (typeof obj.n === 'string'    && Array.isArray(obj.w))         return decodeCompactTrip(obj);
+    if (typeof obj.name === 'string' && Array.isArray(obj.waypoints)) return obj;
+    return null;
   } catch (e) {
     return null;
   }
@@ -67,21 +143,18 @@ function buildExportUrl(trip) {
 }
 
 /**
- * Export the currently-edited trip by copying a shareable URL to the clipboard.
+ * Open the share modal for the currently-edited trip, populated with both
+ * the compact share URL and the plain-text compact JSON.
  */
 function exportCurrentTrip() {
   const trip = getEditTrip();
   if (!trip) return;
-  const url = buildExportUrl(trip);
-  if (window.isSecureContext && navigator.clipboard) {
-    navigator.clipboard.writeText(url).then(() => {
-      alert('Share URL copied to clipboard!');
-    }).catch(() => {
-      prompt('Copy this URL to share the trip:', url);
-    });
-  } else {
-    prompt('Copy this URL to share the trip:', url);
-  }
+  const url  = buildExportUrl(trip);
+  const text = encodeTripCompact(trip);
+  $('#share-url-input').val(url);
+  $('#share-url-note').toggleClass('hidden', url.length <= 2000);
+  $('#share-text-input').val(text);
+  $('#share-modal').removeClass('hidden');
 }
 
 /**
@@ -923,6 +996,81 @@ $(function () {
 
   // ── Edit — export trip ────────────────────────────────────
   $('#btn-export-trip').on('click', exportCurrentTrip);
+
+  // ── Share modal ───────────────────────────────────────────
+  function copyWithFeedback($btn, text, label, $target) {
+    if (window.isSecureContext && navigator.clipboard) {
+      navigator.clipboard.writeText(text).then(() => {
+        $btn.text('Copied!');
+        setTimeout(() => $btn.text(label), 2000);
+      }).catch(() => {
+        if ($target) $target[0].select();
+      });
+    } else {
+      if ($target) $target[0].select();
+    }
+  }
+
+  $('#btn-copy-url').on('click', function () {
+    copyWithFeedback($(this), $('#share-url-input').val(), 'Copy', $('#share-url-input'));
+  });
+
+  $('#btn-copy-text').on('click', function () {
+    copyWithFeedback($(this), $('#share-text-input').val(), '📋 Copy text', $('#share-text-input'));
+  });
+
+  $('#share-modal-close').on('click', () => $('#share-modal').addClass('hidden'));
+
+  $('#share-modal').on('click', function (e) {
+    if ($(e.target).is('#share-modal')) $('#share-modal').addClass('hidden');
+  });
+
+  // ── Import from text ──────────────────────────────────────
+  $('#btn-import-text').on('click', () => {
+    $('#import-text-input').val('');
+    $('#import-text-modal').removeClass('hidden');
+  });
+
+  $('#btn-import-text-go').on('click', () => {
+    const text = $('#import-text-input').val().trim();
+    if (!text) return;
+    const data = decodeTripFromText(text);
+    if (!data || typeof data.name !== 'string' || !data.name.trim() ||
+        !Array.isArray(data.waypoints) || data.waypoints.length === 0) {
+      alert('Could not read the trip from the text – the data may be invalid or corrupted.');
+      return;
+    }
+    $('#import-text-modal').addClass('hidden');
+
+    // Reuse the import confirmation modal.
+    const n         = data.waypoints.length;
+    const existing  = trips.find(t => t.name === data.name);
+    const renamedTo = uniqueTripName(data.name);
+    pendingImport = { data, existing, renamedTo };
+
+    if (existing) {
+      $('#import-modal-desc').text(
+        `A trip named "${data.name}" (${n} waypoint${n !== 1 ? 's' : ''}) already exists in your list.`,
+      );
+      $('#import-modal-add').hide();
+      $('#import-modal-overwrite').show().text(`Overwrite "${existing.name}"`);
+      $('#import-modal-rename').show().text(`Import as "${renamedTo}"`);
+    } else {
+      $('#import-modal-desc').text(
+        `Import trip "${data.name}" with ${n} waypoint${n !== 1 ? 's' : ''}?`,
+      );
+      $('#import-modal-add').show();
+      $('#import-modal-overwrite').hide();
+      $('#import-modal-rename').hide();
+    }
+    $('#import-modal').removeClass('hidden');
+  });
+
+  $('#btn-import-text-cancel').on('click', () => $('#import-text-modal').addClass('hidden'));
+
+  $('#import-text-modal').on('click', function (e) {
+    if ($(e.target).is('#import-text-modal')) $('#import-text-modal').addClass('hidden');
+  });
 
   // ── Import modal ──────────────────────────────────────────
   $('#import-modal-add').on('click', () => {
