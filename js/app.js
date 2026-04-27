@@ -4,19 +4,6 @@
 // UTILITIES
 // ═══════════════════════════════════════════
 
-/**
- * Haversine great-circle distance between two [lat, lng] pairs, in metres.
- */
-function haversine(a, b) {
-  const R  = 6371000;
-  const φ1 = a[0] * Math.PI / 180;
-  const φ2 = b[0] * Math.PI / 180;
-  const Δφ = (b[0] - a[0]) * Math.PI / 180;
-  const Δλ = (b[1] - a[1]) * Math.PI / 180;
-  const s  = Math.sin(Δφ / 2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(s));
-}
-
 /** Format metres → human-readable string. */
 function fmtDist(m) {
   if (m < 1000) return Math.round(m) + '\u202fm';
@@ -253,20 +240,21 @@ let driveNearestMarker  = null;
  *   cumDist         – array of cumulative distances to each waypoint
  *   upcomingIndices – waypoint indices whose cumDist > distAlong
  *
- * Uses turf.js for accurate geospatial nearest-point calculations on great-circle paths.
+ * Uses turf.js for accurate geospatial calculations on great-circle paths.
  */
 function nearestOnPath(posLatLng, waypoints) {
   if (!waypoints || waypoints.length < 2) return null;
 
   const n = waypoints.length;
 
-  // Cumulative distances to each waypoint (using haversine for accuracy)
+  // Cumulative distances to each waypoint (using turf.js for accuracy)
   const segLengths = [];
   const cumDist    = [0];
   for (let i = 0; i < n - 1; i++) {
-    const d = haversine(
-      [waypoints[i].lat, waypoints[i].lng],
-      [waypoints[i + 1].lat, waypoints[i + 1].lng]
+    const d = turf.distance(
+      [waypoints[i].lng, waypoints[i].lat],
+      [waypoints[i + 1].lng, waypoints[i + 1].lat],
+      { units: 'meters' }
     );
     segLengths.push(d);
     cumDist.push(cumDist[i] + d);
@@ -738,7 +726,11 @@ function renderMetroLine(trip, info) {
   // ── Segment distances ──────────────────────────────────────
   const segDists = [];
   for (let i = 0; i < n - 1; i++) {
-    segDists.push(haversine([wps[i].lat, wps[i].lng], [wps[i + 1].lat, wps[i + 1].lng]));
+    segDists.push(turf.distance(
+      [wps[i].lng, wps[i].lat],
+      [wps[i + 1].lng, wps[i + 1].lat],
+      { units: 'meters' }
+    ));
   }
   const totalDist = segDists.reduce((s, d) => s + d, 0);
 
