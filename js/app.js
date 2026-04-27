@@ -212,6 +212,7 @@ function renderEditMap(rezoom=true) {
     const marker = L.marker([wp.lat, wp.lng], {
       draggable: true,
       title:     wp.name || `Waypoint ${idx + 1}`,
+      icon: wp.name ? new L.Icon.Default() : L.divIcon({ html: `<div class="edit-marker"></div>` }),
     }).addTo(map);
 
     marker.bindTooltip(
