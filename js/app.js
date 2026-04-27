@@ -102,10 +102,24 @@ function exportCurrentTrip() {
  * If baseName already exists, appends -1, -2, … until unique.
  */
 function uniqueTripName(baseName) {
-  if (!trips.find(t => t.name === baseName)) return baseName;
+  const names = new Set(trips.map(t => t.name));
+  if (!names.has(baseName)) return baseName;
   let i = 1;
-  while (trips.find(t => t.name === baseName + '-' + i)) i += 1;
+  while (names.has(baseName + '-' + i)) i += 1;
   return baseName + '-' + i;
+}
+
+/**
+ * Validate and extract only the expected fields from an imported waypoint object.
+ */
+function sanitizeWaypoint(w) {
+  return {
+    id:   uid(),
+    lat:  typeof w.lat  === 'number' ? w.lat  : 0,
+    lng:  typeof w.lng  === 'number' ? w.lng  : 0,
+    name: typeof w.name === 'string' ? w.name : '',
+    desc: typeof w.desc === 'string' ? w.desc : '',
+  };
 }
 
 /** Pending import data while the import modal is open. */
@@ -120,14 +134,14 @@ function importTripFromUrl() {
   const encoded = params.get('trip');
   if (!encoded) return;
 
-  // Strip the query string from the address bar immediately.
-  window.history.replaceState({}, '', window.location.pathname);
-
   const data = decodeTripFromParam(encoded);
   if (!data || typeof data.name !== 'string' || !Array.isArray(data.waypoints)) {
     alert('Could not read the trip from the URL – the link may be invalid or corrupted.');
     return;
   }
+
+  // Strip the query string from the address bar only after validation succeeds.
+  window.history.replaceState({}, '', window.location.pathname);
 
   const n = data.waypoints.length;
   const existing = trips.find(t => t.name === data.name);
@@ -163,13 +177,7 @@ function doImport(name, existingId) {
     const existing = trips.find(t => t.id === existingId);
     if (existing) {
       existing.name = name;
-      existing.waypoints = data.waypoints.map(w => ({
-        id:   uid(),
-        lat:  typeof w.lat  === 'number' ? w.lat  : 0,
-        lng:  typeof w.lng  === 'number' ? w.lng  : 0,
-        name: typeof w.name === 'string' ? w.name : '',
-        desc: typeof w.desc === 'string' ? w.desc : '',
-      }));
+      existing.waypoints = data.waypoints.map(sanitizeWaypoint);
       saveTrips(trips);
       renderTripList();
       $('#import-modal').addClass('hidden');
@@ -181,13 +189,7 @@ function doImport(name, existingId) {
   const trip = {
     id:        uid(),
     name,
-    waypoints: data.waypoints.map(w => ({
-      id:   uid(),
-      lat:  typeof w.lat  === 'number' ? w.lat  : 0,
-      lng:  typeof w.lng  === 'number' ? w.lng  : 0,
-      name: typeof w.name === 'string' ? w.name : '',
-      desc: typeof w.desc === 'string' ? w.desc : '',
-    })),
+    waypoints: data.waypoints.map(sanitizeWaypoint),
   };
   trips.push(trip);
   saveTrips(trips);
