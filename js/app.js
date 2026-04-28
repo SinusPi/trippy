@@ -333,9 +333,9 @@ const WAYPOINT_PROXIMITY_THRESHOLD = 1;
 /** Minimum horizontal pixel span between two waypoints before a distance label is drawn. */
 const MIN_LABEL_WIDTH_PX = 24;
 /** Metres within which the vertical metro shows "● here" instead of a distance for a waypoint. */
-const WAYPOINT_HERE_THRESHOLD_M = 50;
+const WAYPOINT_HERE_THRESHOLD = 50;
 /** Minimum route-speed (m/s) before ETAs are displayed (~1.8 km/h – avoids noisy ETAs when stationary). */
-const MIN_SPEED_FOR_ETA_MS = 0.5;
+const MIN_SPEED_FOR_ETA_MPS = 0.5;
 /** Pixels from the top of the vertical metro scroll box to keep the position marker below when auto-scrolling. */
 const METRO_V_SCROLL_OFFSET_PX = 32;
 
@@ -1077,6 +1077,7 @@ function refreshMetroLine() {
   if (!driveState) return;
   const trip = trips.find(t => t.id === driveState.tripId);
   renderMetroLine(trip, driveState.lastInfo);
+  renderMetroVertical(trip, driveState.lastInfo);
 }
 
 // ═══════════════════════════════════════════
@@ -1084,13 +1085,17 @@ function refreshMetroLine() {
 // ═══════════════════════════════════════════
 
 /**
- * Renders a vertical "metro-line" style route overview into #metro-v-inner.
- * Waypoints are evenly spaced vertically (each row has equal height).
- * Named waypoints and endpoints show their name, distance remaining, ETA and
- * description; unnamed intermediate waypoints appear as smaller dots only.
- * A position marker (amber dot) is inserted between the two waypoints that
- * flank the current GPS location.  The scroll box auto-scrolls to keep the
- * position marker near the top unless metroVScrollPaused is true.
+ * Renders the vertical metro-line overview into #metro-v-inner.
+ *
+ * An SVG draws the vertical track, waypoint dots, and the position marker.
+ * Waypoint text (name, distance, ETA, description) lives in HTML divs that
+ * are absolutely positioned so their vertical centre aligns with the
+ * corresponding dot in the SVG.
+ *
+ * Spacing follows the same proportional / even logic as the horizontal metro
+ * (controlled by the shared metroProp flag):
+ *   – proportional: dot y-positions mirror real inter-waypoint distances
+ *   – even: dots are equally spaced regardless of distance
  *
  * @param {object}      trip  – the trip object (with waypoints)
  * @param {object|null} info  – result of nearestOnPath(), or null if no GPS yet
@@ -1107,131 +1112,180 @@ function renderMetroVertical(trip, info) {
   const wps = trip.waypoints;
   const n   = wps.length;
 
-  // Use cumDist from the nearestOnPath result when available (avoids recomputing).
+  // ── Segment distances ──────────────────────────────────────
+  const segDists = [];
+  for (let i = 0; i < n - 1; i++) {
+    segDists.push(turf.distance(
+      [wps[i].lng, wps[i].lat],
+      [wps[i + 1].lng, wps[i + 1].lat],
+      { units: 'meters' },
+    ));
+  }
+  const totalDist = segDists.reduce((s, d) => s + d, 0);
+
+  // Cumulative normalised distances [0 … 1]
+  const cumDistNorm = [0];
+  for (let i = 0; i < n - 1; i++) {
+    cumDistNorm.push(cumDistNorm[i] + (totalDist > 0 ? segDists[i] / totalDist : 1 / (n - 1)));
+  }
+
+  // ── Layout constants ───────────────────────────────────────
+  // SVG_W must match the CSS .mv-info-div { left: 36px } value.
+  const SVG_W   = 36;   // width of the SVG track column (px)
+  const TRACK_X = 18;   // x of the vertical track centre within the SVG
+  const PAD_V   = 24;   // vertical padding at top and bottom (px)
+  const DOT_R   = 7;    // radius of named / endpoint dots
+  const DOT_R_SM = 4;   // radius of unnamed intermediate dots
+  const STEP_PX = 52;   // pixels per waypoint slot in even-spacing mode
+
+  const TRACK_H = (n - 1) * STEP_PX;
+  const SVG_H   = PAD_V + TRACK_H + PAD_V;
+
+  // Fraction (0–1) for each waypoint along the visual track
+  // (mirrors the horizontal metro's metroProp logic exactly)
+  const fractions = metroProp
+    ? cumDistNorm
+    : wps.map((_, i) => i / (n - 1));
+
+  const dotY = fractions.map(f => PAD_V + f * TRACK_H);
+
+  // Progress fraction along the visual track (same formula as horizontal metro)
+  const progressFrac = info
+    ? (metroProp
+        ? (info.totalDist > 0 ? info.distAlong / info.totalDist : 0)
+        : (n > 1 ? (info.segIdx + info.segT) / (n - 1) : 0))
+    : null;
+
+  const posY = progressFrac !== null ? PAD_V + progressFrac * TRACK_H : null;
+
+  // Cumulative distances (metres) used for "distance remaining" labels
   const cumDist = (info && info.cumDist)
     ? info.cumDist
-    : (() => {
-        const cd = [0];
-        for (let i = 0; i < n - 1; i++) {
-          cd.push(cd[i] + turf.distance(
-            [wps[i].lng, wps[i].lat],
-            [wps[i + 1].lng, wps[i + 1].lat],
-            { units: 'meters' },
-          ));
-        }
-        return cd;
-      })();
+    : cumDistNorm.map(f => f * totalDist);
 
-  // Has waypoint idx been passed (i.e. is the current position at or past it)?
+  // Has waypoint idx been passed?
   function isPassed(idx) {
     return info !== null && cumDist[idx] <= info.distAlong + WAYPOINT_PROXIMITY_THRESHOLD;
   }
 
   const routeSpeedMs = computeRouteSpeed();
-  const posSegIdx    = info ? info.segIdx : null; // insert position marker after this index
 
-  $inner.empty();
-  let $posRow = null;
+  // ── Build SVG ─────────────────────────────────────────────
+  const NS = 'http://www.w3.org/2000/svg';
 
+  function el(tag, attrs, text) {
+    const e = document.createElementNS(NS, tag);
+    Object.entries(attrs).forEach(([k, v]) => e.setAttribute(k, v));
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+
+  const svg = el('svg', {
+    width:  SVG_W,
+    height: SVG_H,
+    style:  'display:block; position:absolute; top:0; left:0; overflow:visible;',
+  });
+
+  // Background track
+  svg.appendChild(el('line', {
+    x1: TRACK_X, y1: PAD_V,
+    x2: TRACK_X, y2: PAD_V + TRACK_H,
+    stroke: '#cbd5e1', 'stroke-width': 4, 'stroke-linecap': 'round',
+  }));
+
+  // Completed portion
+  if (posY !== null) {
+    svg.appendChild(el('line', {
+      x1: TRACK_X, y1: PAD_V,
+      x2: TRACK_X, y2: posY,
+      stroke: '#2563eb', 'stroke-width': 4, 'stroke-linecap': 'round',
+    }));
+  }
+
+  // Waypoint dots
   wps.forEach((wp, idx) => {
+    const cy         = dotY[idx];
     const passed     = isPassed(idx);
+    const isEndpoint = idx === 0 || idx === n - 1;
+    const r          = (wp.name || isEndpoint) ? DOT_R : DOT_R_SM;
+
+    svg.appendChild(el('circle', {
+      cx: TRACK_X, cy, r,
+      fill:           passed ? '#93c5fd' : '#fff',
+      stroke:         passed ? '#2563eb' : '#94a3b8',
+      'stroke-width': 2.5,
+    }));
+  });
+
+  // Position marker – ring + filled dot (same style as horizontal metro)
+  if (posY !== null) {
+    svg.appendChild(el('circle', {
+      cx: TRACK_X, cy: posY, r: DOT_R + 5,
+      fill: 'none', stroke: '#f59e0b', 'stroke-width': 2, opacity: 0.5,
+    }));
+    svg.appendChild(el('circle', {
+      cx: TRACK_X, cy: posY, r: DOT_R - 1,
+      fill: '#f59e0b', stroke: '#fff', 'stroke-width': 2,
+    }));
+  }
+
+  // ── Assemble: SVG + absolutely-positioned info divs ───────
+  $inner.empty().css('height', SVG_H + 'px');
+  $inner.append(svg);
+
+  // Info div for each named waypoint / endpoint, centred on its dot
+  wps.forEach((wp, idx) => {
     const isFirst    = idx === 0;
     const isLast     = idx === n - 1;
-    const isNamed    = !!(wp.name);
     const isEndpoint = isFirst || isLast;
+    if (!wp.name && !isEndpoint) return;
 
-    // Top segment (from waypoint idx-1 to idx): passed once we've reached waypoint idx.
-    const topPassed = isPassed(idx);
-    // Bottom segment (from waypoint idx to idx+1): passed once we've passed waypoint idx
-    // (meaning we've started travelling this segment).
-    const botPassed = isPassed(idx) && idx < n - 1;
+    const $div = $('<div class="mv-info-div">').css('top', dotY[idx] + 'px');
+    const displayName = wp.name || (isFirst ? 'Start' : 'Destination');
+    $div.append($('<span class="mv-name">').text(displayName));
 
-    const $row = $('<div class="mv-row">');
-
-    // ── Track column ──────────────────────────────────────────
-    const $track = $('<div class="mv-track-col">');
-
-    if (isFirst) {
-      $track.append($('<div>').addClass('mv-seg invisible'));
-    } else {
-      $track.append($('<div>').addClass('mv-seg' + (topPassed ? ' passed' : '')));
-    }
-
-    $track.append($('<div>').addClass(
-      'mv-dot' +
-      (isNamed || isEndpoint ? '' : ' minor') +
-      (passed ? ' passed' : ''),
-    ));
-
-    if (isLast) {
-      $track.append($('<div>').addClass('mv-seg invisible'));
-    } else {
-      $track.append($('<div>').addClass('mv-seg' + (botPassed ? ' passed' : '')));
-    }
-
-    $row.append($track);
-
-    // ── Info column (named waypoints and endpoints only) ──────
-    if (isNamed || isEndpoint) {
-      const $info = $('<div class="mv-info-col">');
-      const displayName = wp.name || (isFirst ? 'Start' : 'Destination');
-      $info.append($('<span class="mv-name">').text(displayName));
-
-      if (info) {
-        const dist = cumDist[idx] - info.distAlong;
-        if (dist > WAYPOINT_HERE_THRESHOLD_M) {
-          $info.append($('<span class="mv-dist">').text('in ' + fmtDist(dist)));
-          if (routeSpeedMs !== null && routeSpeedMs > MIN_SPEED_FOR_ETA_MS) {
-            const etaStr = fmtEta(dist / routeSpeedMs);
-            if (etaStr) $info.append($('<span class="mv-eta">').text('ETA: ' + etaStr));
-          }
-        } else if (dist > -WAYPOINT_HERE_THRESHOLD_M) {
-          $info.append($('<span class="mv-dist here">').text('● here'));
+    if (info) {
+      const dist = cumDist[idx] - info.distAlong;
+      if (dist > WAYPOINT_HERE_THRESHOLD) {
+        $div.append($('<span class="mv-dist">').text('in ' + fmtDist(dist)));
+        if (routeSpeedMs !== null && routeSpeedMs > MIN_SPEED_FOR_ETA_MPS) {
+          const etaStr = fmtEta(dist / routeSpeedMs);
+          if (etaStr) $div.append($('<span class="mv-eta">').text('ETA: ' + etaStr));
         }
-      } else {
-        if (cumDist[idx] > 0) {
-          $info.append($('<span class="mv-dist">').text(fmtDist(cumDist[idx]) + ' from start'));
-        }
+      } else if (dist > -WAYPOINT_HERE_THRESHOLD) {
+        $div.append($('<span class="mv-dist here">').text('● here'));
       }
-
-      if (wp.desc) {
-        $info.append($('<span class="mv-desc">').text(wp.desc));
+    } else {
+      if (cumDist[idx] > 0) {
+        $div.append($('<span class="mv-dist">').text(fmtDist(cumDist[idx]) + ' from start'));
       }
-
-      $row.append($info);
     }
 
-    $inner.append($row);
-
-    // Insert position marker after waypoint posSegIdx (between posSegIdx and posSegIdx+1).
-    if (info && posSegIdx === idx && idx < n - 1) {
-      $posRow = $('<div class="mv-row">');
-
-      const $posTrack = $('<div class="mv-track-col">');
-      $posTrack.append($('<div>').addClass('mv-seg passed'));
-      $posTrack.append($('<div class="mv-pos-dot">'));
-      $posTrack.append($('<div>').addClass('mv-seg'));
-      $posRow.append($posTrack);
-
-      const $posInfo = $('<div class="mv-info-col">');
-      $posInfo.append($('<span class="mv-you-label">').text('▶ you are here'));
-      $posRow.append($posInfo);
-
-      $inner.append($posRow);
+    if (wp.desc) {
+      $div.append($('<span class="mv-desc">').text(wp.desc));
     }
+
+    $inner.append($div);
   });
+
+  // "You are here" label aligned to the position dot
+  if (posY !== null) {
+    $inner.append(
+      $('<div class="mv-info-div">').css('top', posY + 'px')
+        .append($('<span class="mv-you-label">').text('▶ you are here')),
+    );
+  }
 
   $section.removeClass('hidden');
 
   // ── Auto-scroll: keep position marker near the top of the visible area ──
-  if ($posRow && !metroVScrollPaused) {
+  if (posY !== null && !metroVScrollPaused) {
     const scrollEl = document.getElementById('metro-v-scroll');
     if (scrollEl) {
-      scrollEl.scrollTop = Math.max(0, $posRow[0].offsetTop - METRO_V_SCROLL_OFFSET_PX);
+      scrollEl.scrollTop = Math.max(0, posY - METRO_V_SCROLL_OFFSET_PX);
     }
   }
 }
-
 
 
 $(function () {
