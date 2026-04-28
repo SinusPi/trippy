@@ -44,6 +44,29 @@ function computeSpeed() {
   return dist / dt; // m/s
 }
 
+/**
+ * Compute the current route-speed in m/s from the last 10 seconds of GPS history
+ * stored in driveState.gpsHistory. Uses Δ(distAlong) / Δt to measure how fast
+ * the vehicle advances along the route polyline, which automatically compensates
+ * for route simplification (straight-line segments are shorter than real roads).
+ * Returns null if there is not enough data.
+ */
+function computeRouteSpeed() {
+  if (!driveState || !driveState.gpsHistory || driveState.gpsHistory.length < 2) return null;
+  const history = driveState.gpsHistory;
+  const latest  = history[history.length - 1].ts;
+  const cutoff  = latest - 10000; // 10 seconds before the most recent sample
+  const recent  = history.filter(p => p.ts >= cutoff && p.distAlong != null);
+  if (recent.length < 2) return null;
+  const first = recent[0];
+  const last  = recent[recent.length - 1];
+  const dt = (last.ts - first.ts) / 1000; // seconds
+  if (dt < 0.5) return null;
+  const delta = last.distAlong - first.distAlong;
+  if (delta <= 0) return null; // not advancing along the route
+  return delta / dt; // m/s along the route polyline
+}
+
 /** Generate a small collision-free unique ID. */
 function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2);
@@ -748,6 +771,7 @@ function onGpsUpdate(geoPos, fromTest = false) {
   const now = Date.now();
   driveState.gpsHistory.push({ ts: now, lat: posLL.lat, lng: posLL.lng });
   driveState.gpsHistory = driveState.gpsHistory.filter(p => now - p.ts <= 15000);
+  // distAlong will be added to the latest entry after nearestOnPath() is called below
 
   // ── GPS label
   const acc = geoPos.coords.accuracy;
@@ -779,6 +803,9 @@ function onGpsUpdate(geoPos, fromTest = false) {
   if (!info) return;
   driveState.lastInfo = info;
 
+  // Record distAlong in the latest history entry so computeRouteSpeed() can use it
+  driveState.gpsHistory[driveState.gpsHistory.length - 1].distAlong = info.distAlong;
+
   // Nearest-point marker
   if (!driveNearestMarker) {
     driveNearestMarker = L.circleMarker(info.nearestLatLng, {
@@ -789,7 +816,8 @@ function onGpsUpdate(geoPos, fromTest = false) {
   }
 
   // ── Speed
-  const speedMs  = computeSpeed(); // m/s or null
+  const speedMs       = computeSpeed();       // true GPS speed in m/s (for display)
+  const routeSpeedMs  = computeRouteSpeed();  // speed along the route polyline in m/s (for ETA)
   const speedKmh = speedMs !== null ? speedMs * 3.6 : null;
 
   // ── Progress stats
@@ -815,8 +843,8 @@ function onGpsUpdate(geoPos, fromTest = false) {
       const $li = $('<li class="upcoming-item">')
         .append(`<span class="up-name">${wp.name || 'Waypoint'}</span>`)
         .append(`<span class="up-dist">in ${fmtDist(dist)}</span>`);
-      if (speedMs !== null && speedMs > 0.5) {
-        const etaStr = fmtEta(dist / speedMs);
+      if (routeSpeedMs !== null && routeSpeedMs > 0.5) {
+        const etaStr = fmtEta(dist / routeSpeedMs);
         if (etaStr) $li.append(`<span class="up-eta">ETA: ${etaStr}</span>`);
       }
       if (wp.desc) $li.append(`<span class="up-desc">${wp.desc}</span>`);
