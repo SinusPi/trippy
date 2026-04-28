@@ -21,6 +21,17 @@
     <p class="subtitle">Route Progress Tracker</p>
   </header>
 
+  <!-- Trip selector (shared across modes) -->
+  <section id="trip-top-section">
+    <select id="trip-selector">
+      <option value="">-- select a trip --</option>
+    </select>
+    <div class="btn-row">
+      <button id="btn-new-trip" class="action-btn">+ New Trip</button>
+      <button id="btn-import-text" class="action-btn secondary">📋 Import…</button>
+    </div>
+  </section>
+
   <!-- Mode tabs -->
   <div id="mode-tabs">
     <button id="btn-edit-mode"   class="tab-btn active">✏️ Edit</button>
@@ -30,15 +41,10 @@
   <!-- ── EDIT PANEL ── -->
   <div id="edit-panel" class="panel">
 
-    <section id="trip-list-section">
-      <h2>Trips</h2>
-      <ul id="trip-list"></ul>
-      <button id="btn-new-trip" class="action-btn full-width">+ New Trip</button>
-    </section>
+    <p id="edit-no-trip-msg" class="hint">Select or create a trip above to begin editing.</p>
 
     <section id="trip-edit-section" class="hidden">
       <div class="section-header">
-        <button id="btn-back-to-list" class="icon-btn" title="Back">◀</button>
         <h2 id="trip-edit-title">Edit Trip</h2>
         <button id="btn-export-trip" class="icon-btn" title="Share trip URL">📤</button>
         <button id="btn-delete-trip" class="icon-btn danger" title="Delete trip">🗑</button>
@@ -58,12 +64,9 @@
   <!-- ── DRIVE PANEL ── -->
   <div id="drive-panel" class="panel hidden">
 
-    <section id="trip-select-section">
-      <h2>Select Trip</h2>
-      <select id="trip-selector">
-        <option value="">-- choose a trip --</option>
-      </select>
-      <button id="btn-start-drive" class="action-btn full-width" disabled>Start Driving</button>
+    <section id="drive-idle-section">
+      <p id="drive-idle-msg" class="hint">Select a trip above to start driving.</p>
+      <button id="btn-start-drive" class="action-btn full-width hidden">Start Driving</button>
     </section>
 
     <section id="drive-status-section" class="hidden">
@@ -91,6 +94,10 @@
         <div class="stat-row">
           <span class="label">Total length</span>
           <span id="stat-total" class="value">—</span>
+        </div>
+        <div class="stat-row">
+          <span class="label">Speed</span>
+          <span id="stat-speed" class="value">—</span>
         </div>
 
         <div id="progress-bar-wrap">
@@ -138,6 +145,42 @@
       <button id="wp-modal-delete" class="action-btn danger">Delete</button>
       <button id="wp-modal-cancel" class="action-btn secondary">Cancel</button>
       <button id="wp-modal-save"   class="action-btn">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== SHARE TRIP MODAL ===== -->
+<div id="share-modal" class="modal hidden">
+  <div class="modal-box">
+    <h3>Share Trip</h3>
+    <label>Share link
+      <div class="input-row">
+        <input id="share-url-input" type="text" readonly>
+        <button id="btn-copy-url" class="action-btn secondary">Copy</button>
+      </div>
+    </label>
+    <p id="share-url-note" class="hint hidden">⚠️ This URL is long and may not work everywhere. Use "Copy text" to share instead.</p>
+    <label>Share as text <span class="share-text-label">(paste into a message or email)</span>
+      <textarea id="share-text-input" rows="3" readonly class="share-text"></textarea>
+    </label>
+    <div class="modal-actions">
+      <button id="btn-copy-text" class="action-btn">📋 Copy text</button>
+      <button id="share-modal-close" class="action-btn secondary">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== IMPORT FROM TEXT MODAL ===== -->
+<div id="import-text-modal" class="modal hidden">
+  <div class="modal-box">
+    <h3>Import Trip from Text</h3>
+    <p class="hint">Paste trip data shared by someone else (text or URL).</p>
+    <label>
+      <textarea id="import-text-input" rows="5" placeholder="Paste trip data here…" class="share-text"></textarea>
+    </label>
+    <div class="modal-actions">
+      <button id="btn-import-text-go" class="action-btn">Import</button>
+      <button id="btn-import-text-cancel" class="action-btn secondary">Cancel</button>
     </div>
   </div>
 </div>

@@ -46,6 +46,24 @@ body {
 #sidebar header h1 { font-size: 20px; }
 #sidebar header .subtitle { font-size: 11px; opacity: 0.85; margin-top: 2px; }
 
+/* Trip selector at top */
+#trip-top-section {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.btn-row {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-row .action-btn {
+  flex: 1;
+}
+
 /* Mode tabs */
 #mode-tabs {
   display: flex;
@@ -175,7 +193,9 @@ textarea { resize: vertical; }
 }
 .wp-item:hover { background: #dbeafe; }
 .wp-item .wp-num  { font-size: 11px; color: var(--muted); min-width: 18px; }
-.wp-item .wp-name { flex: 1; font-size: 13px; }
+.wp-item .wp-info { flex: 1; display: flex; flex-direction: column; gap: 1px; }
+.wp-item .wp-name { font-size: 13px; }
+.wp-item .wp-desc { font-size: 11px; color: var(--muted); }
 .wp-item .wp-coords { font-size: 10px; color: var(--muted); }
 
 /* Hint */
@@ -230,6 +250,7 @@ textarea { resize: vertical; }
 }
 .upcoming-item .up-name { font-weight: 500; font-size: 13px; }
 .upcoming-item .up-dist { font-size: 12px; color: var(--accent); }
+.upcoming-item .up-eta  { font-size: 12px; color: var(--muted); }
 .upcoming-item .up-desc { font-size: 11px; color: var(--muted); }
 
 /* Hidden utility */
@@ -324,6 +345,27 @@ textarea { resize: vertical; }
   display: block;
   width: 100%;
   height: auto;
+}
+
+/* ===== SHARE ROW (URL input + button inline) ===== */
+.input-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+.input-row input {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+}
+.share-text {
+  font-size: 11px;
+  font-family: monospace;
+  resize: none;
+}
+.share-text-label {
+  font-size: 11px;
+  color: var(--muted);
 }
 
 /* ===== RESPONSIVE ===== */

@@ -4,23 +4,44 @@
 // UTILITIES
 // ═══════════════════════════════════════════
 
-/**
- * Haversine great-circle distance between two [lat, lng] pairs, in metres.
- */
-function haversine(a, b) {
-  const R  = 6371000;
-  const φ1 = a[0] * Math.PI / 180;
-  const φ2 = b[0] * Math.PI / 180;
-  const Δφ = (b[0] - a[0]) * Math.PI / 180;
-  const Δλ = (b[1] - a[1]) * Math.PI / 180;
-  const s  = Math.sin(Δφ / 2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(s));
-}
-
 /** Format metres → human-readable string. */
 function fmtDist(m) {
   if (m < 1000) return Math.round(m) + '\u202fm';
   return (m / 1000).toFixed(1) + '\u202fkm';
+}
+
+/** Format seconds → human-readable duration string (e.g. "2 min", "1 h 15 min"). */
+function fmtEta(seconds) {
+  if (!isFinite(seconds) || seconds <= 0) return null;
+  const mins = Math.round(seconds / 60);
+  if (mins < 1)  return '<1\u202fmin';
+  if (mins < 60) return `${mins}\u202fmin`;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return m > 0 ? `${h}\u202fh\u202f${m}\u202fmin` : `${h}\u202fh`;
+}
+
+/**
+ * Compute the current speed in m/s from the last 10 seconds of GPS history
+ * stored in driveState.gpsHistory. Returns null if there is not enough data.
+ */
+function computeSpeed() {
+  if (!driveState || !driveState.gpsHistory || driveState.gpsHistory.length < 2) return null;
+  const history = driveState.gpsHistory;
+  const latest  = history[history.length - 1].ts;
+  const cutoff  = latest - 10000; // 10 seconds before the most recent sample
+  const recent  = history.filter(p => p.ts >= cutoff);
+  if (recent.length < 2) return null;
+  const first = recent[0];
+  const last  = recent[recent.length - 1];
+  const dt = (last.ts - first.ts) / 1000; // seconds
+  if (dt < 0.5) return null;
+  const dist = turf.distance(
+    [first.lng, first.lat],
+    [last.lng,  last.lat],
+    { units: 'meters' },
+  );
+  return dist / dt; // m/s
 }
 
 /** Generate a small collision-free unique ID. */
@@ -46,27 +67,103 @@ function saveTrips(trips) {
 // ═══════════════════════════════════════════
 
 /**
- * Encode a trip as a base64 string suitable for use in a URL query parameter.
- * Uses TextEncoder to correctly handle multi-byte (non-ASCII) characters.
+ * Decode a compact (v2) trip object { n, w } into the standard { name, waypoints } shape.
  */
-function encodeTripForUrl(trip) {
-  const data  = { name: trip.name, waypoints: trip.waypoints };
-  const bytes = new TextEncoder().encode(JSON.stringify(data));
-  let binary  = '';
-  bytes.forEach(b => { binary += String.fromCharCode(b); });
-  return btoa(binary);
+function decodeCompactTrip(compact) {
+  if (!compact || typeof compact.n !== 'string' || !Array.isArray(compact.w)) return null;
+  return {
+    name: compact.n,
+    waypoints: compact.w.map(item => {
+      if (!Array.isArray(item) || item.length < 2) return null;
+      return {
+        lat:  typeof item[0] === 'number' ? item[0] : 0,
+        lng:  typeof item[1] === 'number' ? item[1] : 0,
+        name: typeof item[2] === 'string' ? item[2] : '',
+        desc: typeof item[3] === 'string' ? item[3] : '',
+      };
+    }).filter(Boolean),
+  };
 }
 
 /**
- * Decode a trip from a base64 URL parameter produced by encodeTripForUrl().
- * Returns the parsed object or null on failure.
+ * Build a compact JSON string for a trip (v2 format).
+ * Waypoints are encoded as arrays [lat, lng, name, desc] to minimise size.
+ * Coordinates are rounded to 5 decimal places (~1 m precision).
+ */
+function encodeTripCompact(trip) {
+  return JSON.stringify({
+    n: trip.name,
+    w: trip.waypoints.map(wp => [
+      parseFloat(wp.lat.toFixed(5)),
+      parseFloat(wp.lng.toFixed(5)),
+      wp.name || '',
+      wp.desc || '',
+    ]),
+  });
+}
+
+/**
+ * Encode a trip as a URL-safe base64url string (v2 compact format).
+ * Produces roughly half the bytes of the old verbose JSON base64 encoding.
+ */
+function encodeTripForUrl(trip) {
+  const bytes  = new TextEncoder().encode(encodeTripCompact(trip));
+  let binary   = '';
+  bytes.forEach(b => { binary += String.fromCharCode(b); });
+  // base64url: replace '+' → '-', '/' → '_', strip '=' padding
+  return 'v2_' + btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+/**
+ * Decode a trip from a URL parameter.
+ * Supports the current compact base64url (v2) format and the legacy base64-JSON format.
+ * Returns the parsed { name, waypoints } object, or null on failure.
  */
 function decodeTripFromParam(param) {
   try {
-    const binary = atob(param);
+    if (param.startsWith('v2_')) {
+      // Compact format: base64url-encoded compact JSON
+      const b64    = param.slice(3).replace(/-/g, '+').replace(/_/g, '/');
+      const binary = atob(b64);
+      const bytes  = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      return decodeCompactTrip(JSON.parse(new TextDecoder().decode(bytes)));
+    }
+    // Legacy format: plain base64-encoded full JSON.
+    // URLSearchParams decodes '+' as space, so restore before calling atob().
+    const fixed  = param.replace(/ /g, '+');
+    const binary = atob(fixed);
     const bytes  = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
     return JSON.parse(new TextDecoder().decode(bytes));
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Decode a trip from pasted plain text.
+ * Accepts the compact v2 JSON format, the legacy full-JSON format, or a
+ * full share URL (so users can paste either the text or the URL into the box).
+ * Returns the parsed { name, waypoints } object, or null on failure.
+ */
+function decodeTripFromText(text) {
+  const trimmed = text.trim();
+  // If the text looks like a URL, extract the trip param and decode it.
+  if (trimmed.includes('?trip=') || trimmed.includes('&trip=')) {
+    try {
+      const url     = new URL(trimmed);
+      const encoded = url.searchParams.get('trip');
+      if (encoded) return decodeTripFromParam(encoded);
+    } catch (e) { /* fall through */ }
+  }
+  // Otherwise try parsing as JSON (compact v2 or legacy).
+  try {
+    const obj = JSON.parse(trimmed);
+    if (!obj) return null;
+    if (typeof obj.n === 'string'    && Array.isArray(obj.w))         return decodeCompactTrip(obj);
+    if (typeof obj.name === 'string' && Array.isArray(obj.waypoints)) return obj;
+    return null;
   } catch (e) {
     return null;
   }
@@ -80,21 +177,18 @@ function buildExportUrl(trip) {
 }
 
 /**
- * Export the currently-edited trip by copying a shareable URL to the clipboard.
+ * Open the share modal for the currently-edited trip, populated with both
+ * the compact share URL and the plain-text compact JSON.
  */
 function exportCurrentTrip() {
   const trip = getEditTrip();
   if (!trip) return;
-  const url = buildExportUrl(trip);
-  if (window.isSecureContext && navigator.clipboard) {
-    navigator.clipboard.writeText(url).then(() => {
-      alert('Share URL copied to clipboard!');
-    }).catch(() => {
-      prompt('Copy this URL to share the trip:', url);
-    });
-  } else {
-    prompt('Copy this URL to share the trip:', url);
-  }
+  const url  = buildExportUrl(trip);
+  const text = encodeTripCompact(trip);
+  $('#share-url-input').val(url);
+  $('#share-url-note').toggleClass('hidden', url.length <= 2000);
+  $('#share-text-input').val(text);
+  $('#share-modal').removeClass('hidden');
 }
 
 /**
@@ -253,20 +347,21 @@ let driveNearestMarker  = null;
  *   cumDist         – array of cumulative distances to each waypoint
  *   upcomingIndices – waypoint indices whose cumDist > distAlong
  *
- * Uses turf.js for accurate geospatial nearest-point calculations on great-circle paths.
+ * Uses turf.js for accurate geospatial calculations on great-circle paths.
  */
 function nearestOnPath(posLatLng, waypoints) {
   if (!waypoints || waypoints.length < 2) return null;
 
   const n = waypoints.length;
 
-  // Cumulative distances to each waypoint (using haversine for accuracy)
+  // Cumulative distances to each waypoint (using turf.js for accuracy)
   const segLengths = [];
   const cumDist    = [0];
   for (let i = 0; i < n - 1; i++) {
-    const d = haversine(
-      [waypoints[i].lat, waypoints[i].lng],
-      [waypoints[i + 1].lat, waypoints[i + 1].lng]
+    const d = turf.distance(
+      [waypoints[i].lng, waypoints[i].lat],
+      [waypoints[i + 1].lng, waypoints[i + 1].lat],
+      { units: 'meters' }
     );
     segLengths.push(d);
     cumDist.push(cumDist[i] + d);
@@ -379,8 +474,10 @@ function renderEditMap(rezoom=true) {
       icon: wp.name ? new L.Icon.Default() : L.divIcon({ html: `<div class="edit-marker"></div>` }),
     }).addTo(map);
 
+    const tipName = $('<span>').text(wp.name || 'Waypoint ' + (idx + 1)).html();
+    const tipDesc = wp.desc ? '<br>' + $('<span>').text(wp.desc).html() : '';
     marker.bindTooltip(
-      `<b>${wp.name || 'Waypoint ' + (idx + 1)}</b>`,
+      `<b>${tipName}</b>${tipDesc}`,
       { permanent: false },
     );
 
@@ -408,22 +505,8 @@ function renderEditMap(rezoom=true) {
 // ═══════════════════════════════════════════
 
 function renderTripList() {
-  const $list = $('#trip-list').empty();
-  if (trips.length === 0) {
-    $list.append(
-      '<li style="color:var(--muted);font-size:13px;padding:8px 0">' +
-      'No trips yet. Click "+ New Trip" to create one.</li>',
-    );
-    return;
-  }
-  trips.forEach(trip => {
-    const n = trip.waypoints.length;
-    $('<li class="trip-item">')
-      .append(`<span class="trip-name">${trip.name || 'Unnamed Trip'}</span>`)
-      .append(`<span class="trip-meta">${n} waypoint${n !== 1 ? 's' : ''}</span>`)
-      .on('click', () => openTripEdit(trip.id))
-      .appendTo($list);
-  });
+  // Kept for backward compatibility (called by import handlers); delegates to populateTripSelector.
+  populateTripSelector();
 }
 
 function renderWaypointList() {
@@ -431,9 +514,14 @@ function renderWaypointList() {
   const $list = $('#waypoint-list').empty();
   if (!trip) return;
   trip.waypoints.forEach((wp, idx) => {
+    const $name = wp.name
+      ? $('<span class="wp-name">').text(wp.name)
+      : $('<span class="wp-name">').append($('<em>').text('unnamed'));
+    const $info = $('<div class="wp-info">').append($name);
+    if (wp.desc) $info.append($('<span class="wp-desc">').text(wp.desc));
     $('<li class="wp-item">')
       .append(`<span class="wp-num">${idx + 1}</span>`)
-      .append(`<span class="wp-name">${wp.name || '<em>unnamed</em>'}</span>`)
+      .append($info)
       .append(`<span class="wp-coords">${wp.lat.toFixed(4)}, ${wp.lng.toFixed(4)}</span>`)
       .on('click', () => openWaypointModal(wp.id))
       .appendTo($list);
@@ -443,12 +531,16 @@ function renderWaypointList() {
 function openTripEdit(id) {
   editTripId = id;
   const trip = getEditTrip();
-  if (!trip) return;
+  if (!trip) {
+    closeTripEdit();
+    return;
+  }
 
-  $('#trip-list-section').addClass('hidden');
+  $('#edit-no-trip-msg').addClass('hidden');
   $('#trip-edit-section').removeClass('hidden');
   $('#trip-edit-title').text(trip.name || 'Unnamed Trip');
   $('#trip-name-input').val(trip.name || '');
+  $('#trip-selector').val(id);
   renderWaypointList();
   renderEditMap(true); // DO rezoom when opening a trip, to frame all its waypoints nicely
 }
@@ -457,8 +549,8 @@ function closeTripEdit() {
   editTripId = null;
   clearEditLayers();
   $('#trip-edit-section').addClass('hidden');
-  $('#trip-list-section').removeClass('hidden');
-  renderTripList();
+  $('#edit-no-trip-msg').removeClass('hidden');
+  populateTripSelector();
 }
 
 // ═══════════════════════════════════════════
@@ -555,17 +647,38 @@ function renderDriveMap(trip) {
 // ═══════════════════════════════════════════
 
 function populateTripSelector() {
-  const $sel = $('#trip-selector').empty();
-  $sel.append('<option value="">-- choose a trip --</option>');
+  const $sel = $('#trip-selector');
+  const prevVal = $sel.val();
+  $sel.empty().append('<option value="">-- select a trip --</option>');
   trips.forEach(trip => {
-    if (trip.waypoints.length >= 2) {
-      $sel.append(
-        `<option value="${trip.id}">${trip.name || 'Unnamed Trip'} ` +
-        `(${trip.waypoints.length} waypoints)</option>`,
-      );
-    }
+    const n = trip.waypoints.length;
+    $sel.append(
+      `<option value="${trip.id}">${trip.name || 'Unnamed Trip'} ` +
+      `(${n} waypoint${n !== 1 ? 's' : ''})</option>`,
+    );
   });
-  $('#btn-start-drive').prop('disabled', true);
+  // Restore previous selection if the trip still exists.
+  if (prevVal && trips.find(t => t.id === prevVal)) {
+    $sel.val(prevVal);
+  }
+}
+
+function updateDriveIdleSection() {
+  const tripId = $('#trip-selector').val();
+  const trip   = trips.find(t => t.id === tripId);
+  let msg = null;
+  if (!tripId || !trip) {
+    msg = 'Select a trip above to start driving.';
+  } else if (trip.waypoints.length < 2) {
+    msg = 'This trip needs at least 2 waypoints to drive.';
+  }
+  if (msg !== null) {
+    $('#drive-idle-msg').text(msg).removeClass('hidden');
+    $('#btn-start-drive').addClass('hidden');
+  } else {
+    $('#drive-idle-msg').addClass('hidden');
+    $('#btn-start-drive').removeClass('hidden');
+  }
 }
 
 function startDrive() {
@@ -574,9 +687,9 @@ function startDrive() {
   const trip = trips.find(t => t.id === tripId);
   if (!trip || trip.waypoints.length < 2) return;
 
-  driveState = { tripId, watchId: null, posLatLng: null, lastInfo: null, testMode: false };
+  driveState = { tripId, watchId: null, posLatLng: null, lastInfo: null, testMode: false, gpsHistory: [] };
 
-  $('#trip-select-section').addClass('hidden');
+  $('#drive-idle-section').addClass('hidden');
   $('#drive-status-section').removeClass('hidden');
   $('#drive-trip-name').text(trip.name || 'Unnamed Trip');
   $('#btn-test-mode').text('🧪 Test mode: Off').addClass('secondary');
@@ -612,9 +725,13 @@ function stopDrive() {
 
   $('#btn-test-mode').text('🧪 Test mode: Off').addClass('secondary');
   $('#drive-status-section').addClass('hidden');
-  $('#trip-select-section').removeClass('hidden');
   $('#metro-section').addClass('hidden');
   $('#metro-line-container').empty();
+
+  if (mode === 'drive') {
+    $('#drive-idle-section').removeClass('hidden');
+    updateDriveIdleSection();
+  }
 }
 
 function onGpsUpdate(geoPos, fromTest = false) {
@@ -626,6 +743,11 @@ function onGpsUpdate(geoPos, fromTest = false) {
 
   const posLL = L.latLng(geoPos.coords.latitude, geoPos.coords.longitude);
   driveState.posLatLng = posLL;
+
+  // ── Update GPS history for speed calculation (keep last 15 s)
+  const now = Date.now();
+  driveState.gpsHistory.push({ ts: now, lat: posLL.lat, lng: posLL.lng });
+  driveState.gpsHistory = driveState.gpsHistory.filter(p => now - p.ts <= 15000);
 
   // ── GPS label
   const acc = geoPos.coords.accuracy;
@@ -666,6 +788,10 @@ function onGpsUpdate(geoPos, fromTest = false) {
     driveNearestMarker.setLatLng(info.nearestLatLng);
   }
 
+  // ── Speed
+  const speedMs  = computeSpeed(); // m/s or null
+  const speedKmh = speedMs !== null ? speedMs * 3.6 : null;
+
   // ── Progress stats
   const pct       = info.totalDist > 0 ? (info.distAlong / info.totalDist) * 100 : 0;
   const remaining = info.totalDist - info.distAlong;
@@ -674,6 +800,7 @@ function onGpsUpdate(geoPos, fromTest = false) {
   $('#stat-progress').text(fmtDist(info.distAlong));
   $('#stat-remaining').text(fmtDist(remaining));
   $('#stat-total').text(fmtDist(info.totalDist));
+  $('#stat-speed').text(speedKmh !== null ? `${Math.round(speedKmh)}\u202fkm/h` : '—');
   $('#progress-bar').css('width', pct.toFixed(1) + '%');
 
   // ── Upcoming waypoints (up to 3)
@@ -688,6 +815,10 @@ function onGpsUpdate(geoPos, fromTest = false) {
       const $li = $('<li class="upcoming-item">')
         .append(`<span class="up-name">${wp.name || 'Waypoint'}</span>`)
         .append(`<span class="up-dist">in ${fmtDist(dist)}</span>`);
+      if (speedMs !== null && speedMs > 0.5) {
+        const etaStr = fmtEta(dist / speedMs);
+        if (etaStr) $li.append(`<span class="up-eta">ETA: ${etaStr}</span>`);
+      }
       if (wp.desc) $li.append(`<span class="up-desc">${wp.desc}</span>`);
       $list.append($li);
     });
@@ -738,7 +869,11 @@ function renderMetroLine(trip, info) {
   // ── Segment distances ──────────────────────────────────────
   const segDists = [];
   for (let i = 0; i < n - 1; i++) {
-    segDists.push(haversine([wps[i].lat, wps[i].lng], [wps[i + 1].lat, wps[i + 1].lng]));
+    segDists.push(turf.distance(
+      [wps[i].lng, wps[i].lat],
+      [wps[i + 1].lng, wps[i + 1].lat],
+      { units: 'meters' }
+    ));
   }
   const totalDist = segDists.reduce((s, d) => s + d, 0);
 
@@ -902,23 +1037,37 @@ $(function () {
 
   // ── Mode tabs ──────────────────────────────────────────────
   $('#btn-edit-mode').on('click', () => {
-    if (driveState) return; // don't switch while driving
+    if (driveState) stopDrive();
     mode = 'edit';
     $('#btn-edit-mode').addClass('active');
     $('#btn-drive-mode').removeClass('active');
     $('#edit-panel').removeClass('hidden');
     $('#drive-panel').addClass('hidden');
-    closeTripEdit();
+    // Open the selected trip in edit view (if any)
+    const tripId = $('#trip-selector').val();
+    if (tripId) {
+      openTripEdit(tripId);
+    }
   });
 
   $('#btn-drive-mode').on('click', () => {
+    if (driveState) return; // already driving
     mode = 'drive';
     $('#btn-drive-mode').addClass('active');
     $('#btn-edit-mode').removeClass('active');
     $('#drive-panel').removeClass('hidden');
     $('#edit-panel').addClass('hidden');
-    if (!driveState) closeTripEdit();
-    populateTripSelector();
+    clearEditLayers();
+    // Auto-start driving if a valid trip is selected
+    const tripId = $('#trip-selector').val();
+    const trip   = trips.find(t => t.id === tripId);
+    if (tripId && trip && trip.waypoints.length >= 2) {
+      startDrive();
+    } else {
+      $('#drive-status-section').addClass('hidden');
+      $('#drive-idle-section').removeClass('hidden');
+      updateDriveIdleSection();
+    }
   });
 
   // ── Edit — new trip ────────────────────────────────────────
@@ -926,11 +1075,94 @@ $(function () {
     const trip = { id: uid(), name: 'New Trip', waypoints: [] };
     trips.push(trip);
     saveTrips(trips);
+    populateTripSelector();
+    // Switch to edit mode for the new trip
+    if (driveState) stopDrive();
+    mode = 'edit';
+    $('#btn-edit-mode').addClass('active');
+    $('#btn-drive-mode').removeClass('active');
+    $('#edit-panel').removeClass('hidden');
+    $('#drive-panel').addClass('hidden');
     openTripEdit(trip.id);
   });
 
   // ── Edit — export trip ────────────────────────────────────
   $('#btn-export-trip').on('click', exportCurrentTrip);
+
+  // ── Share modal ───────────────────────────────────────────
+  function copyWithFeedback($btn, text, label, $target) {
+    if (window.isSecureContext && navigator.clipboard) {
+      navigator.clipboard.writeText(text).then(() => {
+        $btn.text('Copied!');
+        setTimeout(() => $btn.text(label), 2000);
+      }).catch(() => {
+        if ($target) $target[0].select();
+      });
+    } else {
+      if ($target) $target[0].select();
+    }
+  }
+
+  $('#btn-copy-url').on('click', function () {
+    copyWithFeedback($(this), $('#share-url-input').val(), 'Copy', $('#share-url-input'));
+  });
+
+  $('#btn-copy-text').on('click', function () {
+    copyWithFeedback($(this), $('#share-text-input').val(), '📋 Copy text', $('#share-text-input'));
+  });
+
+  $('#share-modal-close').on('click', () => $('#share-modal').addClass('hidden'));
+
+  $('#share-modal').on('click', function (e) {
+    if ($(e.target).is('#share-modal')) $('#share-modal').addClass('hidden');
+  });
+
+  // ── Import from text ──────────────────────────────────────
+  $('#btn-import-text').on('click', () => {
+    $('#import-text-input').val('');
+    $('#import-text-modal').removeClass('hidden');
+  });
+
+  $('#btn-import-text-go').on('click', () => {
+    const text = $('#import-text-input').val().trim();
+    if (!text) return;
+    const data = decodeTripFromText(text);
+    if (!data || typeof data.name !== 'string' || !data.name.trim() ||
+        !Array.isArray(data.waypoints) || data.waypoints.length === 0) {
+      alert('Could not read the trip from the text – the data may be invalid or corrupted.');
+      return;
+    }
+    $('#import-text-modal').addClass('hidden');
+
+    // Reuse the import confirmation modal.
+    const n         = data.waypoints.length;
+    const existing  = trips.find(t => t.name === data.name);
+    const renamedTo = uniqueTripName(data.name);
+    pendingImport = { data, existing, renamedTo };
+
+    if (existing) {
+      $('#import-modal-desc').text(
+        `A trip named "${data.name}" (${n} waypoint${n !== 1 ? 's' : ''}) already exists in your list.`,
+      );
+      $('#import-modal-add').hide();
+      $('#import-modal-overwrite').show().text(`Overwrite "${existing.name}"`);
+      $('#import-modal-rename').show().text(`Import as "${renamedTo}"`);
+    } else {
+      $('#import-modal-desc').text(
+        `Import trip "${data.name}" with ${n} waypoint${n !== 1 ? 's' : ''}?`,
+      );
+      $('#import-modal-add').show();
+      $('#import-modal-overwrite').hide();
+      $('#import-modal-rename').hide();
+    }
+    $('#import-modal').removeClass('hidden');
+  });
+
+  $('#btn-import-text-cancel').on('click', () => $('#import-text-modal').addClass('hidden'));
+
+  $('#import-text-modal').on('click', function (e) {
+    if ($(e.target).is('#import-text-modal')) $('#import-text-modal').addClass('hidden');
+  });
 
   // ── Import modal ──────────────────────────────────────────
   $('#import-modal-add').on('click', () => {
@@ -961,15 +1193,15 @@ $(function () {
     }
   });
 
-  // ── Edit — back / delete ───────────────────────────────────
-  $('#btn-back-to-list').on('click', closeTripEdit);
-
+  // ── Edit — delete ─────────────────────────────────────────
   $('#btn-delete-trip').on('click', () => {
     if (!editTripId) return;
     if (!confirm('Delete this trip and all its waypoints?')) return;
     trips = trips.filter(t => t.id !== editTripId);
     saveTrips(trips);
     closeTripEdit();
+    // Clear selector since the trip is now gone
+    $('#trip-selector').val('');
   });
 
   // ── Edit — trip name ───────────────────────────────────────
@@ -979,7 +1211,9 @@ $(function () {
     trip.name = $(this).val().trim();
     $('#trip-edit-title').text(trip.name || 'Unnamed Trip');
     saveTrips(trips);
-    renderTripList();
+    populateTripSelector();
+    // Restore selection after repopulating
+    $('#trip-selector').val(editTripId);
   });
 
   // ── Edit — click map to add waypoint ──────────────────────
@@ -1012,7 +1246,23 @@ $(function () {
 
   // ── Drive ─────────────────────────────────────────────────
   $('#trip-selector').on('change', function () {
-    $('#btn-start-drive').prop('disabled', !$(this).val());
+    const tripId = $(this).val();
+    if (mode === 'edit') {
+      if (tripId) {
+        openTripEdit(tripId);
+      } else {
+        closeTripEdit();
+      }
+    } else if (mode === 'drive') {
+      if (driveState) stopDrive();
+      const trip = trips.find(t => t.id === tripId);
+      if (tripId && trip && trip.waypoints.length >= 2) {
+        startDrive();
+      } else {
+        $('#drive-idle-section').removeClass('hidden');
+        updateDriveIdleSection();
+      }
+    }
   });
 
   $('#btn-start-drive').on('click', startDrive);
@@ -1049,6 +1299,6 @@ $(function () {
   });
 
   // ── Initialise ────────────────────────────────────────────
-  renderTripList();
+  populateTripSelector();
   importTripFromUrl();
 });
