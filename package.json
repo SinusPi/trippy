@@ -1,0 +1,12 @@
+{
+  "name": "trippy",
+  "version": "1.0.0",
+  "description": "Route Progress Tracker",
+  "scripts": {
+    "test": "node test.js"
+  },
+  "devDependencies": {
+    "@turf/turf": "^6.5.0",
+    "@xmldom/xmldom": "^0.9.10"
+  }
+}

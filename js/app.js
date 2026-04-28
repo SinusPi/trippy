@@ -366,6 +366,29 @@ let driveNearestMarker  = null;
 // ═══════════════════════════════════════════
 
 /**
+ * Compute per-segment distances (metres) and cumulative distances for a
+ * sequence of waypoints.  Uses turf.js for geospatial accuracy.
+ *
+ * @param {Array<{ lat: number, lng: number }>} waypoints
+ * @returns {{ segDists: number[], cumDist: number[], totalDist: number }}
+ */
+function computeSegmentDistances(waypoints) {
+  const n        = waypoints.length;
+  const segDists = [];
+  const cumDist  = [0];
+  for (let i = 0; i < n - 1; i++) {
+    const d = turf.distance(
+      [waypoints[i].lng, waypoints[i].lat],
+      [waypoints[i + 1].lng, waypoints[i + 1].lat],
+      { units: 'meters' },
+    );
+    segDists.push(d);
+    cumDist.push(cumDist[i] + d);
+  }
+  return { segDists, cumDist, totalDist: cumDist[n - 1] || 0 };
+}
+
+/**
  * Given a Leaflet LatLng and an array of waypoint objects {lat, lng, …},
  * returns:
  *   nearestLatLng   – L.LatLng of the closest point on any segment
@@ -384,19 +407,7 @@ function nearestOnPath(posLatLng, waypoints) {
 
   const n = waypoints.length;
 
-  // Cumulative distances to each waypoint (using turf.js for accuracy)
-  const segLengths = [];
-  const cumDist    = [0];
-  for (let i = 0; i < n - 1; i++) {
-    const d = turf.distance(
-      [waypoints[i].lng, waypoints[i].lat],
-      [waypoints[i + 1].lng, waypoints[i + 1].lat],
-      { units: 'meters' }
-    );
-    segLengths.push(d);
-    cumDist.push(cumDist[i] + d);
-  }
-  const totalDist = cumDist[n - 1];
+  const { segDists: segLengths, cumDist, totalDist } = computeSegmentDistances(waypoints);
 
   // Build a GeoJSON LineString (turf.js uses [lng, lat] order)
   const lineCoords = waypoints.map(w => [w.lng, w.lat]);
@@ -897,32 +908,18 @@ function onTestPositionClick(latlng) {
 // ═══════════════════════════════════════════
 
 /**
- * Renders an SVG "metro-line" style progress strip into #metro-line-container.
+ * Build and return the horizontal metro-line SVG element for the given trip
+ * and (optional) position info.  Pure DOM function – no jQuery dependency.
  *
  * @param {object}      trip  – the trip object (with waypoints)
  * @param {object|null} info  – result of nearestOnPath(), or null if no GPS yet
+ * @returns {SVGElement}
  */
-function renderMetroLine(trip, info) {
-  const $container = $('#metro-line-container');
-
-  if (!trip || trip.waypoints.length < 2) {
-    $container.empty();
-    return;
-  }
-
+function buildMetroLineSvg(trip, info) {
   const wps = trip.waypoints;
   const n   = wps.length;
 
-  // ── Segment distances ──────────────────────────────────────
-  const segDists = [];
-  for (let i = 0; i < n - 1; i++) {
-    segDists.push(turf.distance(
-      [wps[i].lng, wps[i].lat],
-      [wps[i + 1].lng, wps[i + 1].lat],
-      { units: 'meters' }
-    ));
-  }
-  const totalDist = segDists.reduce((s, d) => s + d, 0);
+  const { segDists, totalDist } = computeSegmentDistances(wps);
 
   // Cumulative distance to each waypoint, normalised to [0, 1]
   const cumDistNorm = [0];
@@ -1066,7 +1063,24 @@ function renderMetroLine(trip, info) {
     }, '▼ you'));
   }
 
-  $container.empty().append(svg);
+  return svg;
+}
+
+/**
+ * Renders an SVG "metro-line" style progress strip into #metro-line-container.
+ *
+ * @param {object}      trip  – the trip object (with waypoints)
+ * @param {object|null} info  – result of nearestOnPath(), or null if no GPS yet
+ */
+function renderMetroLine(trip, info) {
+  const $container = $('#metro-line-container');
+
+  if (!trip || trip.waypoints.length < 2) {
+    $container.empty();
+    return;
+  }
+
+  $container.empty().append(buildMetroLineSvg(trip, info));
 }
 
 // ═══════════════════════════════════════════
@@ -1085,43 +1099,19 @@ function refreshMetroLine() {
 // ═══════════════════════════════════════════
 
 /**
- * Renders the vertical metro-line overview into #metro-v-inner.
- *
- * An SVG draws the vertical track, waypoint dots, and the position marker.
- * Waypoint text (name, distance, ETA, description) lives in HTML divs that
- * are absolutely positioned so their vertical centre aligns with the
- * corresponding dot in the SVG.
- *
- * Spacing follows the same proportional / even logic as the horizontal metro
- * (controlled by the shared metroProp flag):
- *   – proportional: dot y-positions mirror real inter-waypoint distances
- *   – even: dots are equally spaced regardless of distance
+ * Build and return the vertical metro SVG element (track, waypoint dots,
+ * position marker) for the given trip and (optional) position info.
+ * Pure DOM function – no jQuery dependency.
  *
  * @param {object}      trip  – the trip object (with waypoints)
  * @param {object|null} info  – result of nearestOnPath(), or null if no GPS yet
+ * @returns {{ svg: SVGElement, dotY: number[], SVG_H: number, posY: number|null, cumDist: number[] }}
  */
-function renderMetroVertical(trip, info) {
-  const $section = $('#metro-v-section');
-  const $inner   = $('#metro-v-inner');
-
-  if (!trip || trip.waypoints.length < 2) {
-    $section.addClass('hidden');
-    return;
-  }
-
+function buildMetroVerticalSvg(trip, info) {
   const wps = trip.waypoints;
   const n   = wps.length;
 
-  // ── Segment distances ──────────────────────────────────────
-  const segDists = [];
-  for (let i = 0; i < n - 1; i++) {
-    segDists.push(turf.distance(
-      [wps[i].lng, wps[i].lat],
-      [wps[i + 1].lng, wps[i + 1].lat],
-      { units: 'meters' },
-    ));
-  }
-  const totalDist = segDists.reduce((s, d) => s + d, 0);
+  const { segDists, totalDist } = computeSegmentDistances(wps);
 
   // Cumulative normalised distances [0 … 1]
   const cumDistNorm = [0];
@@ -1167,8 +1157,6 @@ function renderMetroVertical(trip, info) {
   function isPassed(idx) {
     return info !== null && cumDist[idx] <= info.distAlong + WAYPOINT_PROXIMITY_THRESHOLD;
   }
-
-  const routeSpeedMs = computeRouteSpeed();
 
   // ── Build SVG ─────────────────────────────────────────────
   const NS = 'http://www.w3.org/2000/svg';
@@ -1229,9 +1217,43 @@ function renderMetroVertical(trip, info) {
     }));
   }
 
+  return { svg, dotY, SVG_H, posY, cumDist };
+}
+
+/**
+ * Renders the vertical metro-line overview into #metro-v-inner.
+ *
+ * An SVG draws the vertical track, waypoint dots, and the position marker.
+ * Waypoint text (name, distance, ETA, description) lives in HTML divs that
+ * are absolutely positioned so their vertical centre aligns with the
+ * corresponding dot in the SVG.
+ *
+ * Spacing follows the same proportional / even logic as the horizontal metro
+ * (controlled by the shared metroProp flag):
+ *   – proportional: dot y-positions mirror real inter-waypoint distances
+ *   – even: dots are equally spaced regardless of distance
+ *
+ * @param {object}      trip  – the trip object (with waypoints)
+ * @param {object|null} info  – result of nearestOnPath(), or null if no GPS yet
+ */
+function renderMetroVertical(trip, info) {
+  const $section = $('#metro-v-section');
+  const $inner   = $('#metro-v-inner');
+
+  if (!trip || trip.waypoints.length < 2) {
+    $section.addClass('hidden');
+    return;
+  }
+
+  const { svg, dotY, SVG_H, posY, cumDist } = buildMetroVerticalSvg(trip, info);
+
   // ── Assemble: SVG + absolutely-positioned info divs ───────
   $inner.empty().css('height', SVG_H + 'px');
   $inner.append(svg);
+
+  const wps          = trip.waypoints;
+  const n            = wps.length;
+  const routeSpeedMs = computeRouteSpeed();
 
   // Info div for each named waypoint / endpoint, centred on its dot
   wps.forEach((wp, idx) => {
@@ -1563,3 +1585,22 @@ $(function () {
   populateTripSelector();
   importTripFromUrl();
 });
+
+// ═══════════════════════════════════════════
+// MODULE EXPORT (Node.js / CommonJS)
+// ═══════════════════════════════════════════
+
+if (typeof module !== 'undefined') {
+  module.exports = {
+    fmtDist,
+    fmtEta,
+    decodeCompactTrip,
+    encodeTripCompact,
+    encodeTripForUrl,
+    decodeTripFromParam,
+    decodeTripFromText,
+    computeSegmentDistances,
+    buildMetroLineSvg,
+    buildMetroVerticalSvg,
+  };
+}
