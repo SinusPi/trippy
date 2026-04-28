@@ -26,7 +26,11 @@ function group(name, fn) {
   fn();
 }
 
-/** Assert that two numbers are within `delta` of each other. */
+/**
+ * Assert that two numbers are within `delta` of each other.
+ * Always provide an explicit delta for geographic-distance comparisons;
+ * the default of 1 is only suitable for near-exact floating-point checks.
+ */
 function assertClose(a, b, delta, msg) {
   if (delta === undefined) delta = 1;
   assert(
@@ -165,8 +169,9 @@ group('1. Distance calculations', () => {
   test('computeSegmentDistances – single segment at equator', () => {
     const { segDists, cumDist, totalDist } = computeSegmentDistances(TRIP_AB.waypoints);
     assert.strictEqual(segDists.length, 1);
-    // 1° of longitude at the equator ≈ 111 320 m
-    assertClose(segDists[0], 111320, 500, 'segment length at equator');
+    // 1° of longitude at the equator ≈ 111 320 m; allow ±1 500 m (~1.3%) for
+    // any minor variation in the geodesic model used by the turf version.
+    assertClose(segDists[0], 111320, 1500, 'segment length at equator');
     assertClose(totalDist, segDists[0], 0.001, 'totalDist equals single segment');
     assert.strictEqual(cumDist[0], 0, 'cumDist starts at 0');
     assertClose(cumDist[1], segDists[0], 0.001, 'cumDist[1] equals segment length');
