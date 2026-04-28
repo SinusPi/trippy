@@ -440,8 +440,10 @@ function renderEditMap(rezoom=true) {
       icon: wp.name ? new L.Icon.Default() : L.divIcon({ html: `<div class="edit-marker"></div>` }),
     }).addTo(map);
 
+    const tipName = $('<span>').text(wp.name || 'Waypoint ' + (idx + 1)).html();
+    const tipDesc = wp.desc ? '<br>' + $('<span>').text(wp.desc).html() : '';
     marker.bindTooltip(
-      `<b>${wp.name || 'Waypoint ' + (idx + 1)}</b>`,
+      `<b>${tipName}</b>${tipDesc}`,
       { permanent: false },
     );
 
@@ -478,9 +480,14 @@ function renderWaypointList() {
   const $list = $('#waypoint-list').empty();
   if (!trip) return;
   trip.waypoints.forEach((wp, idx) => {
+    const $name = wp.name
+      ? $('<span class="wp-name">').text(wp.name)
+      : $('<span class="wp-name">').append($('<em>').text('unnamed'));
+    const $info = $('<div class="wp-info">').append($name);
+    if (wp.desc) $info.append($('<span class="wp-desc">').text(wp.desc));
     $('<li class="wp-item">')
       .append(`<span class="wp-num">${idx + 1}</span>`)
-      .append(`<span class="wp-name">${wp.name || '<em>unnamed</em>'}</span>`)
+      .append($info)
       .append(`<span class="wp-coords">${wp.lat.toFixed(4)}, ${wp.lng.toFixed(4)}</span>`)
       .on('click', () => openWaypointModal(wp.id))
       .appendTo($list);
