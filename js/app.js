@@ -475,6 +475,7 @@ function nearestOnPath(posLatLng, waypoints) {
     segT:           bestT,
     distFromPath:   distFromPath,
     cumDist,
+    segDists:       segLengths,
     upcomingIndices,
   };
 }
@@ -740,7 +741,8 @@ function startDrive() {
   const trip = trips.find(t => t.id === tripId);
   if (!trip || trip.waypoints.length < 2) return;
 
-  driveState = { tripId, watchId: null, posLatLng: null, lastInfo: null, testMode: false, gpsHistory: [] };
+  driveState = { tripId, watchId: null, posLatLng: null, lastInfo: null, testMode: false, gpsHistory: [],
+                  segData: computeSegmentDistances(trip.waypoints) };
 
   $('#drive-idle-section').addClass('hidden');
   $('#drive-status-section').removeClass('hidden');
@@ -755,11 +757,11 @@ function startDrive() {
   renderDriveMap(trip);
 
   // Draw the metro line straight away (without position info)
-  renderMetroLine(trip, null);
+  renderMetroLine(trip, null, driveState.segData);
   $('#metro-section').removeClass('hidden');
 
   // Draw the vertical metro overview straight away (without position info)
-  renderMetroVertical(trip, null);
+  renderMetroVertical(trip, null, driveState.segData);
 
   if (!navigator.geolocation) {
     setGpsStatus('error', 'GPS not supported');
@@ -890,10 +892,10 @@ function onGpsUpdate(geoPos, fromTest = false) {
   }
 
   // ── Metro line
-  renderMetroLine(trip, info);
+  renderMetroLine(trip, info, driveState.segData);
 
   // ── Metro vertical
-  renderMetroVertical(trip, info);
+  renderMetroVertical(trip, info, driveState.segData);
 }
 
 /**
@@ -918,15 +920,16 @@ function onTestPositionClick(latlng) {
  * Build and return the horizontal metro-line SVG element for the given trip
  * and (optional) position info.  Pure DOM function – no jQuery dependency.
  *
- * @param {object}      trip  – the trip object (with waypoints)
- * @param {object|null} info  – result of nearestOnPath(), or null if no GPS yet
+ * @param {object}      trip     – the trip object (with waypoints)
+ * @param {object|null} info     – result of nearestOnPath(), or null if no GPS yet
+ * @param {object}      segData  – { segDists, totalDist } from computeSegmentDistances()
  * @returns {SVGElement}
  */
-function buildMetroLineSvg(trip, info) {
+function buildMetroLineSvg(trip, info, segData) {
   const wps = trip.waypoints;
   const n   = wps.length;
 
-  const { segDists, totalDist } = computeSegmentDistances(wps);
+  const { segDists, totalDist } = segData;
 
   // ── Collapse unnamed intermediate waypoints ────────────────
   // Only named waypoints + the two endpoints are shown on the metro line.
@@ -1110,7 +1113,7 @@ function buildMetroLineSvg(trip, info) {
  * @param {object}      trip  – the trip object (with waypoints)
  * @param {object|null} info  – result of nearestOnPath(), or null if no GPS yet
  */
-function renderMetroLine(trip, info) {
+function renderMetroLine(trip, info, segData) {
   const $container = $('#metro-line-container');
 
   if (!trip || trip.waypoints.length < 2) {
@@ -1118,7 +1121,7 @@ function renderMetroLine(trip, info) {
     return;
   }
 
-  $container.empty().append(buildMetroLineSvg(trip, info));
+  $container.empty().append(buildMetroLineSvg(trip, info, segData));
 }
 
 // ═══════════════════════════════════════════
@@ -1128,8 +1131,8 @@ function renderMetroLine(trip, info) {
 function refreshMetroLine() {
   if (!driveState) return;
   const trip = trips.find(t => t.id === driveState.tripId);
-  renderMetroLine(trip, driveState.lastInfo);
-  renderMetroVertical(trip, driveState.lastInfo);
+  renderMetroLine(trip, driveState.lastInfo, driveState.segData);
+  renderMetroVertical(trip, driveState.lastInfo, driveState.segData);
 }
 
 // ═══════════════════════════════════════════
@@ -1141,15 +1144,16 @@ function refreshMetroLine() {
  * position marker) for the given trip and (optional) position info.
  * Pure DOM function – no jQuery dependency.
  *
- * @param {object}      trip  – the trip object (with waypoints)
- * @param {object|null} info  – result of nearestOnPath(), or null if no GPS yet
+ * @param {object}      trip     – the trip object (with waypoints)
+ * @param {object|null} info     – result of nearestOnPath(), or null if no GPS yet
+ * @param {object}      segData  – { segDists, cumDist, totalDist } from computeSegmentDistances()
  * @returns {{ svg: SVGElement, dotY: number[], SVG_H: number, posY: number|null, cumDist: number[] }}
  */
-function buildMetroVerticalSvg(trip, info) {
+function buildMetroVerticalSvg(trip, info, segData) {
   const wps = trip.waypoints;
   const n   = wps.length;
 
-  const { segDists, cumDist, totalDist } = computeSegmentDistances(wps);
+  const { segDists, cumDist, totalDist } = segData;
 
   // ── Collapse unnamed intermediate waypoints ────────────────
   // Only named waypoints + the two endpoints are shown on the vertical metro.
@@ -1299,7 +1303,7 @@ function buildMetroVerticalSvg(trip, info) {
  * @param {object}      trip  – the trip object (with waypoints)
  * @param {object|null} info  – result of nearestOnPath(), or null if no GPS yet
  */
-function renderMetroVertical(trip, info) {
+function renderMetroVertical(trip, info, segData) {
   const $section = $('#metro-v-section');
   const $inner   = $('#metro-v-inner');
 
@@ -1308,7 +1312,7 @@ function renderMetroVertical(trip, info) {
     return;
   }
 
-  const { svg, dotY, SVG_H, posY, cumDist, collCumDist } = buildMetroVerticalSvg(trip, info);
+  const { svg, dotY, SVG_H, posY, cumDist, collCumDist } = buildMetroVerticalSvg(trip, info, segData);
 
   // ── Assemble: SVG + absolutely-positioned info divs ───────
   $inner.empty().css('height', SVG_H + 'px');
