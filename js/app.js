@@ -336,6 +336,8 @@ const MIN_LABEL_WIDTH_PX = 24;
 const WAYPOINT_HERE_THRESHOLD_M = 50;
 /** Minimum route-speed (m/s) before ETAs are displayed (~1.8 km/h – avoids noisy ETAs when stationary). */
 const MIN_SPEED_FOR_ETA_MS = 0.5;
+/** Pixels from the top of the vertical metro scroll box to keep the position marker below when auto-scrolling. */
+const METRO_V_SCROLL_OFFSET_PX = 32;
 
 // ═══════════════════════════════════════════
 // MAP SETUP
@@ -761,6 +763,7 @@ function stopDrive() {
   $('#metro-line-container').empty();
   $('#metro-v-section').addClass('hidden');
   $('#metro-v-inner').empty();
+  metroVScrollPaused = false;
 
   if (mode === 'drive') {
     $('#drive-idle-section').removeClass('hidden');
@@ -1224,7 +1227,7 @@ function renderMetroVertical(trip, info) {
   if ($posRow && !metroVScrollPaused) {
     const scrollEl = document.getElementById('metro-v-scroll');
     if (scrollEl) {
-      scrollEl.scrollTop = Math.max(0, $posRow[0].offsetTop - 32);
+      scrollEl.scrollTop = Math.max(0, $posRow[0].offsetTop - METRO_V_SCROLL_OFFSET_PX);
     }
   }
 }
