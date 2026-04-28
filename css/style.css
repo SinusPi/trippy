@@ -347,6 +347,43 @@ textarea { resize: vertical; }
   height: auto;
 }
 
+/* ===== METRO VERTICAL ===== */
+#metro-v-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+#metro-v-scroll {
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  user-select: none;
+}
+#metro-v-inner {
+  position: relative;
+  /* height is set dynamically by renderMetroVertical */
+}
+/* Info divs are absolutely positioned so their vertical centre aligns with
+   the corresponding dot in the SVG.  'left' must equal the SVG track-column
+   width (SVG_W constant in renderMetroVertical = 36 px). */
+.mv-info-div {
+  position: absolute;
+  left: 36px;
+  right: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  transform: translateY(-50%);
+}
+.mv-name       { font-size: 13px; font-weight: 500; }
+.mv-dist       { font-size: 11px; color: var(--accent); }
+.mv-dist.here  { color: #b45309; font-weight: 600; }
+.mv-eta        { font-size: 11px; color: var(--muted); }
+.mv-desc       { font-size: 10px; color: var(--muted); }
+.mv-you-label  { font-size: 12px; font-weight: 700; color: #b45309; }
+
 /* ===== SHARE ROW (URL input + button inline) ===== */
 .input-row {
   display: flex;
