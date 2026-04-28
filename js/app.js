@@ -922,18 +922,40 @@ function renderMetroLine(trip, info) {
       { units: 'meters' }
     ));
   }
-  const totalDist = segDists.reduce((s, d) => s + d, 0);
 
-  // Cumulative distance to each waypoint, normalised to [0, 1]
-  const cumDistNorm = [0];
-  for (let i = 0; i < n - 1; i++) {
-    cumDistNorm.push(cumDistNorm[i] + (totalDist > 0 ? segDists[i] / totalDist : 0));
+  // ── Collapse unnamed intermediate waypoints ────────────────
+  // Only named waypoints + the two endpoints are shown on the metro line.
+  // Segments between adjacent visible waypoints are merged into one, with
+  // their distances summed, so unnamed stops are truly invisible.
+  const visIdx = wps.reduce((acc, wp, i) => {
+    if (wp.name || i === 0 || i === n - 1) acc.push(i);
+    return acc;
+  }, []);
+  const visWps = visIdx.map(i => wps[i]);
+  const nv     = visWps.length;
+
+  // Collapsed segment distances: sum original segments between adjacent visible wps
+  const collSegDists = [];
+  for (let vi = 0; vi < nv - 1; vi++) {
+    let dist = 0;
+    for (let oi = visIdx[vi]; oi < visIdx[vi + 1]; oi++) dist += segDists[oi];
+    collSegDists.push(dist);
+  }
+  const collTotalDist = collSegDists.reduce((s, d) => s + d, 0);
+
+  // Cumulative normalised distances for visible waypoints [0 … 1]
+  const collCumDistNorm = [0];
+  for (let vi = 0; vi < nv - 1; vi++) {
+    collCumDistNorm.push(collCumDistNorm[vi] + (collTotalDist > 0 ? collSegDists[vi] / collTotalDist : 1 / (nv - 1)));
   }
 
-  // Fraction for each waypoint along the visual track
+  // Cumulative distances (metres) to each visible waypoint
+  const collCumDist = collCumDistNorm.map(f => f * collTotalDist);
+
+  // Fraction for each visible waypoint along the visual track
   const fractions = metroProp
-    ? cumDistNorm                              // proportional to real distance
-    : wps.map((_, i) => i / (n - 1));         // evenly spaced
+    ? collCumDistNorm                            // proportional to real distance
+    : visWps.map((_, vi) => vi / (nv - 1));     // evenly spaced
 
   // ── Layout constants ───────────────────────────────────────
   // Two rows of labels, above and below the track
@@ -946,18 +968,25 @@ function renderMetroLine(trip, info) {
   const DIST_LABEL_Y = TRACK_Y + DOT_R + 13; // y for inter-segment distance labels
 
   // Progress fraction (0–1) along the track for current position.
-  // In even mode the visual segments are equal-width, so we map the GPS
-  // position using the segment index + intra-segment parameter rather than
-  // the raw distance ratio.
+  // In proportional mode: raw distance ratio.
+  // In even mode: map distAlong into collapsed-segment visual space so the
+  // indicator moves smoothly between visible waypoints regardless of how many
+  // unnamed stops were collapsed together.
   const progressFrac = info
     ? (metroProp
         ? (info.totalDist > 0 ? info.distAlong / info.totalDist : 0)
-        : (n > 1 ? (info.segIdx + info.segT) / (n - 1) : 0))
+        : (() => {
+            let vi = 0;
+            while (vi < nv - 2 && collCumDist[vi + 1] <= info.distAlong) vi++;
+            const segLen = collCumDist[vi + 1] - collCumDist[vi];
+            const t      = segLen > 0 ? Math.min(1, (info.distAlong - collCumDist[vi]) / segLen) : 0;
+            return (vi + t) / (nv - 1);
+          })())
     : null;
 
-  // Has a waypoint been passed?
-  function isPassed(idx) {
-    return info !== null && info.cumDist && info.cumDist[idx] <= info.distAlong + WAYPOINT_PROXIMITY_THRESHOLD;
+  // Has a visible waypoint been passed?
+  function isPassed(vi) {
+    return info !== null && collCumDist[vi] <= info.distAlong + WAYPOINT_PROXIMITY_THRESHOLD;
   }
 
   // ── Build SVG ─────────────────────────────────────────────
@@ -991,10 +1020,11 @@ function renderMetroLine(trip, info) {
   }
 
   // ── Inter-segment distance labels (proportional mode only) ──
+  // Shows the combined distance of each collapsed segment.
   if (metroProp) {
-    for (let i = 0; i < n - 1; i++) {
-      const x1 = PAD_H + TRACK_W * fractions[i];
-      const x2 = PAD_H + TRACK_W * fractions[i + 1];
+    for (let vi = 0; vi < nv - 1; vi++) {
+      const x1 = PAD_H + TRACK_W * fractions[vi];
+      const x2 = PAD_H + TRACK_W * fractions[vi + 1];
       const mx = (x1 + x2) / 2;
       // Only draw if there's reasonable horizontal room
       if (x2 - x1 > MIN_LABEL_WIDTH_PX) {
@@ -1002,18 +1032,15 @@ function renderMetroLine(trip, info) {
           x: mx, y: DIST_LABEL_Y + 2,
           'text-anchor': 'middle', 'font-size': 8,
           fill: '#94a3b8', 'font-family': 'system-ui,sans-serif',
-        }, fmtDist(segDists[i])));
+        }, fmtDist(collSegDists[vi])));
       }
     }
   }
 
-  // ── Waypoint dots + labels ──
-  fractions.forEach((frac, idx) => {
-    const cx         = PAD_H + TRACK_W * frac;
-    const passed     = isPassed(idx);
-    const isEndpoint = idx === 0 || idx === n - 1;
-
-    if (!wps[idx].name && !isEndpoint) return; // skip dots and labels for unnamed waypoints to reduce clutter
+  // ── Waypoint dots + labels (only visible / named waypoints) ──
+  fractions.forEach((frac, vi) => {
+    const cx     = PAD_H + TRACK_W * frac;
+    const passed = isPassed(vi);
 
     // Dot
     svg.appendChild(el('circle', {
@@ -1024,12 +1051,12 @@ function renderMetroLine(trip, info) {
     }));
 
     // Label: even indices above, odd below (only if named)
-    if (wps[idx].name) {
-      const above   = idx % 2 === 0;
-      const labelY  = above
+    if (visWps[vi].name) {
+      const above  = vi % 2 === 0;
+      const labelY = above
         ? TRACK_Y - DOT_R - 6
         : TRACK_Y + DOT_R + 14;
-      const label   = wps[idx].name;
+      const label  = visWps[vi].name;
 
       svg.appendChild(el('text', {
         x: cx, y: labelY,
@@ -1121,51 +1148,74 @@ function renderMetroVertical(trip, info) {
       { units: 'meters' },
     ));
   }
-  const totalDist = segDists.reduce((s, d) => s + d, 0);
 
-  // Cumulative normalised distances [0 … 1]
-  const cumDistNorm = [0];
-  for (let i = 0; i < n - 1; i++) {
-    cumDistNorm.push(cumDistNorm[i] + (totalDist > 0 ? segDists[i] / totalDist : 1 / (n - 1)));
+  // ── Collapse unnamed intermediate waypoints ────────────────
+  // Only named waypoints + the two endpoints are shown on the vertical metro.
+  // Segments between adjacent visible waypoints are merged into one, with
+  // their distances summed, so unnamed stops are truly invisible.
+  const visIdx = wps.reduce((acc, wp, i) => {
+    if (wp.name || i === 0 || i === n - 1) acc.push(i);
+    return acc;
+  }, []);
+  const visWps = visIdx.map(i => wps[i]);
+  const nv     = visWps.length;
+
+  // Collapsed segment distances: sum original segments between adjacent visible wps
+  const collSegDists = [];
+  for (let vi = 0; vi < nv - 1; vi++) {
+    let dist = 0;
+    for (let oi = visIdx[vi]; oi < visIdx[vi + 1]; oi++) dist += segDists[oi];
+    collSegDists.push(dist);
   }
+  const collTotalDist = collSegDists.reduce((s, d) => s + d, 0);
+
+  // Cumulative normalised distances for visible waypoints [0 … 1]
+  const collCumDistNorm = [0];
+  for (let vi = 0; vi < nv - 1; vi++) {
+    collCumDistNorm.push(collCumDistNorm[vi] + (collTotalDist > 0 ? collSegDists[vi] / collTotalDist : 1 / (nv - 1)));
+  }
+
+  // Cumulative distances (metres) to each visible waypoint
+  const collCumDist = collCumDistNorm.map(f => f * collTotalDist);
 
   // ── Layout constants ───────────────────────────────────────
   // SVG_W must match the CSS .mv-info-div { left: 36px } value.
   const SVG_W   = 36;   // width of the SVG track column (px)
   const TRACK_X = 18;   // x of the vertical track centre within the SVG
   const PAD_V   = 24;   // vertical padding at top and bottom (px)
-  const DOT_R   = 7;    // radius of named / endpoint dots
-  const DOT_R_SM = 4;   // radius of unnamed intermediate dots
+  const DOT_R   = 7;    // radius of waypoint dots
   const STEP_PX = 52;   // pixels per waypoint slot in even-spacing mode
 
-  const TRACK_H = (n - 1) * STEP_PX;
+  const TRACK_H = (nv - 1) * STEP_PX;
   const SVG_H   = PAD_V + TRACK_H + PAD_V;
 
-  // Fraction (0–1) for each waypoint along the visual track
-  // (mirrors the horizontal metro's metroProp logic exactly)
+  // Fraction (0–1) for each visible waypoint along the visual track
   const fractions = metroProp
-    ? cumDistNorm
-    : wps.map((_, i) => i / (n - 1));
+    ? collCumDistNorm
+    : visWps.map((_, vi) => vi / (nv - 1));
 
   const dotY = fractions.map(f => PAD_V + f * TRACK_H);
 
-  // Progress fraction along the visual track (same formula as horizontal metro)
+  // Progress fraction along the visual track.
+  // In proportional mode: raw distance ratio.
+  // In even mode: map distAlong into collapsed-segment visual space.
   const progressFrac = info
     ? (metroProp
         ? (info.totalDist > 0 ? info.distAlong / info.totalDist : 0)
-        : (n > 1 ? (info.segIdx + info.segT) / (n - 1) : 0))
+        : (() => {
+            let vi = 0;
+            while (vi < nv - 2 && collCumDist[vi + 1] <= info.distAlong) vi++;
+            const segLen = collCumDist[vi + 1] - collCumDist[vi];
+            const t      = segLen > 0 ? Math.min(1, (info.distAlong - collCumDist[vi]) / segLen) : 0;
+            return (vi + t) / (nv - 1);
+          })())
     : null;
 
   const posY = progressFrac !== null ? PAD_V + progressFrac * TRACK_H : null;
 
-  // Cumulative distances (metres) used for "distance remaining" labels
-  const cumDist = (info && info.cumDist)
-    ? info.cumDist
-    : cumDistNorm.map(f => f * totalDist);
-
-  // Has waypoint idx been passed?
-  function isPassed(idx) {
-    return info !== null && cumDist[idx] <= info.distAlong + WAYPOINT_PROXIMITY_THRESHOLD;
+  // Has visible waypoint vi been passed?
+  function isPassed(vi) {
+    return info !== null && collCumDist[vi] <= info.distAlong + WAYPOINT_PROXIMITY_THRESHOLD;
   }
 
   const routeSpeedMs = computeRouteSpeed();
@@ -1202,15 +1252,13 @@ function renderMetroVertical(trip, info) {
     }));
   }
 
-  // Waypoint dots
-  wps.forEach((wp, idx) => {
-    const cy         = dotY[idx];
-    const passed     = isPassed(idx);
-    const isEndpoint = idx === 0 || idx === n - 1;
-    const r          = (wp.name || isEndpoint) ? DOT_R : DOT_R_SM;
+  // Waypoint dots (only visible / named waypoints – unnamed stops are hidden)
+  visWps.forEach((wp, vi) => {
+    const cy     = dotY[vi];
+    const passed = isPassed(vi);
 
     svg.appendChild(el('circle', {
-      cx: TRACK_X, cy, r,
+      cx: TRACK_X, cy, r: DOT_R,
       fill:           passed ? '#93c5fd' : '#fff',
       stroke:         passed ? '#2563eb' : '#94a3b8',
       'stroke-width': 2.5,
@@ -1233,19 +1281,16 @@ function renderMetroVertical(trip, info) {
   $inner.empty().css('height', SVG_H + 'px');
   $inner.append(svg);
 
-  // Info div for each named waypoint / endpoint, centred on its dot
-  wps.forEach((wp, idx) => {
-    const isFirst    = idx === 0;
-    const isLast     = idx === n - 1;
-    const isEndpoint = isFirst || isLast;
-    if (!wp.name && !isEndpoint) return;
+  // Info div for each visible waypoint (all are named or endpoints), centred on its dot
+  visWps.forEach((wp, vi) => {
+    const isFirst = vi === 0;
 
-    const $div = $('<div class="mv-info-div">').css('top', dotY[idx] + 'px');
+    const $div = $('<div class="mv-info-div">').css('top', dotY[vi] + 'px');
     const displayName = wp.name || (isFirst ? 'Start' : 'Destination');
     $div.append($('<span class="mv-name">').text(displayName));
 
     if (info) {
-      const dist = cumDist[idx] - info.distAlong;
+      const dist = collCumDist[vi] - info.distAlong;
       if (dist > WAYPOINT_HERE_THRESHOLD) {
         $div.append($('<span class="mv-dist">').text('in ' + fmtDist(dist)));
         if (routeSpeedMs !== null && routeSpeedMs > MIN_SPEED_FOR_ETA_MPS) {
@@ -1256,8 +1301,8 @@ function renderMetroVertical(trip, info) {
         $div.append($('<span class="mv-dist here">').text('● here'));
       }
     } else {
-      if (cumDist[idx] > 0) {
-        $div.append($('<span class="mv-dist">').text(fmtDist(cumDist[idx]) + ' from start'));
+      if (collCumDist[vi] > 0) {
+        $div.append($('<span class="mv-dist">').text(fmtDist(collCumDist[vi]) + ' from start'));
       }
     }
 
