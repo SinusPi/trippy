@@ -20,7 +20,20 @@
  */
 
 /**
- * Result of nearestOnPath().
+ * Runtime state while a drive session is active. Null when not driving.
+ * @typedef {{
+ *   tripId:     string,
+ *   watchId:    number|null,
+ *   posLatLng:  L.LatLng|null,
+ *   lastInfo:   PathPositionInfo|null,
+ *   testMode:   boolean,
+ *   gpsHistory: Array<{ ts: number, lat: number, lng: number, distAlong?: number }>,
+ *   segData:    SegData,
+ * }} DriveState
+ */
+
+/**
+ * Result of getPathPositionInfo
  * @typedef {{
  *   nearestLatLng:   L.LatLng,
  *   distAlong:       number,
@@ -31,7 +44,7 @@
  *   cumDist:         number[],
  *   segDists:        number[],
  *   upcomingIndices: number[],
- * }} PathInfo
+ * }} PathPositionInfo
  */
 
 // ═══════════════════════════════════════════
@@ -389,7 +402,8 @@ const ImportExport = (() => {
 let trips       = loadTrips();
 let mode        = 'edit';  // 'edit' | 'drive'
 let editTripId  = null;    // ID of trip currently open in edit mode
-let driveState  = null;    // { tripId, watchId, posLatLng, lastInfo }
+/** @type {DriveState|null} */
+let driveState  = null;
 let metroProp   = true;    // true = proportional spacing, false = even spacing
 let metroVScrollPaused = false; // true while the user holds down on the vertical metro scroll box
 
@@ -470,9 +484,9 @@ function computeSegmentDistances(waypoints) {
  *
  * @param {L.LatLng}   posLatLng
  * @param {Waypoint[]} waypoints
- * @returns {PathInfo|null}
+ * @returns {PathPositionInfo|null}
  */
-function nearestOnPath(posLatLng, waypoints) {
+function getPathPositionInfo(posLatLng, waypoints) {
   if (!waypoints || waypoints.length < 2) return null;
 
   const n = waypoints.length;
@@ -568,7 +582,7 @@ function renderEditMap(rezoom=true) {
       L.DomEvent.stopPropagation(e);
       const trip = getEditTrip();
       if (!trip) return;
-      const info = nearestOnPath(e.latlng, trip.waypoints);
+      const info = getPathPositionInfo(e.latlng, trip.waypoints);
       if (!info) return;
       const wp = { id: uid(), lat: info.nearestLatLng.lat, lng: info.nearestLatLng.lng, name: '', desc: '' };
       trip.waypoints.splice(info.segIdx + 1, 0, wp);
@@ -891,20 +905,20 @@ function onGpsUpdate(geoPos, fromTest = false) {
   }
 
   // ── Geometry
-  const info = nearestOnPath(posLL, trip.waypoints);
-  if (!info) return;
-  driveState.lastInfo = info;
+  const positionInfo = getPathPositionInfo(posLL, trip.waypoints);
+  if (!positionInfo) return;
+  driveState.lastInfo = positionInfo;
 
   // Record distAlong in the latest history entry so computeRouteSpeed() can use it
-  driveState.gpsHistory[driveState.gpsHistory.length - 1].distAlong = info.distAlong;
+  driveState.gpsHistory[driveState.gpsHistory.length - 1].distAlong = positionInfo.distAlong;
 
   // Nearest-point marker
   if (!driveNearestMarker) {
-    driveNearestMarker = L.circleMarker(info.nearestLatLng, {
+    driveNearestMarker = L.circleMarker(positionInfo.nearestLatLng, {
       radius: 5, color: '#f59e0b', fillColor: '#fbbf24', fillOpacity: 1, weight: 2,
     }).addTo(map);
   } else {
-    driveNearestMarker.setLatLng(info.nearestLatLng);
+    driveNearestMarker.setLatLng(positionInfo.nearestLatLng);
   }
 
   // ── Speed
@@ -913,21 +927,21 @@ function onGpsUpdate(geoPos, fromTest = false) {
   const speedKmh = speedMs !== null ? speedMs * 3.6 : null;
 
   // ── Progress stats
-  const pct       = info.totalDist > 0 ? (info.distAlong / info.totalDist) * 100 : 0;
-  const remaining = info.totalDist - info.distAlong;
+  const pct       = positionInfo.totalDist > 0 ? (positionInfo.distAlong / positionInfo.totalDist) * 100 : 0;
+  const remaining = positionInfo.totalDist - positionInfo.distAlong;
 
   $('#progress-card').removeClass('hidden');
-  $('#stat-progress').text(fmtDist(info.distAlong));
+  $('#stat-progress').text(fmtDist(positionInfo.distAlong));
   $('#stat-remaining').text(fmtDist(remaining));
-  $('#stat-total').text(fmtDist(info.totalDist));
+  $('#stat-total').text(fmtDist(positionInfo.totalDist));
   $('#stat-speed').text(speedKmh !== null ? `${Math.round(speedKmh)}\u202fkm/h` : '—');
   $('#progress-bar').css('width', pct.toFixed(1) + '%');
 
   // ── Upcoming waypoints (up to 3)
-  const upcoming = info.upcomingIndices.slice(0, 3).map(i => ({
+  const upcoming = positionInfo.upcomingIndices.slice(0, 3).map(i => ({
     i,
     wp:   trip.waypoints[i],
-    dist: info.cumDist[i] - info.distAlong,
+    dist: positionInfo.cumDist[i] - positionInfo.distAlong,
   }));
 
   if (upcoming.length > 0) {
@@ -950,10 +964,10 @@ function onGpsUpdate(geoPos, fromTest = false) {
   }
 
   // ── Metro line
-  renderMetroLine(trip, info, driveState.segData);
+  renderMetroLine(trip, positionInfo, driveState.segData);
 
   // ── Metro vertical
-  renderMetroVertical(trip, info, driveState.segData);
+  renderMetroVertical(trip, positionInfo, driveState.segData);
 }
 
 /**
@@ -979,7 +993,7 @@ function onTestPositionClick(latlng) {
  * and (optional) position info.  Pure DOM function – no jQuery dependency.
  *
  * @param {Trip}          trip
- * @param {PathInfo|null} info     — null if no GPS fix yet
+ * @param {PathPositionInfo|null} info     — null if no GPS fix yet
  * @param {SegData}       segData
  * @returns {SVGElement}
  */
@@ -1169,7 +1183,7 @@ function buildMetroLineSvg(trip, info, segData) {
  * Renders an SVG "metro-line" style progress strip into #metro-line-container.
  *
  * @param {Trip}          trip
- * @param {PathInfo|null} info     — null if no GPS fix yet
+ * @param {PathPositionInfo|null} info     — null if no GPS fix yet
  * @param {SegData}       segData
  */
 function renderMetroLine(trip, info, segData) {
@@ -1204,7 +1218,7 @@ function refreshMetroLine() {
  * Pure DOM function – no jQuery dependency.
  *
  * @param {Trip}          trip
- * @param {PathInfo|null} info     — null if no GPS fix yet
+ * @param {PathPositionInfo|null} info     — null if no GPS fix yet
  * @param {SegData}       segData
  * @returns {{ svg: SVGElement, dotY: number[], SVG_H: number, posY: number|null, cumDist: number[] }}
  */
@@ -1360,7 +1374,7 @@ function buildMetroVerticalSvg(trip, info, segData) {
  *   – even: dots are equally spaced regardless of distance
  *
  * @param {Trip}          trip
- * @param {PathInfo|null} info     — null if no GPS fix yet
+ * @param {PathPositionInfo|null} info     — null if no GPS fix yet
  * @param {SegData}       segData
  */
 function renderMetroVertical(trip, info, segData) {
