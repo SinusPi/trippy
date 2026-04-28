@@ -10,6 +10,40 @@ function fmtDist(m) {
   return (m / 1000).toFixed(1) + '\u202fkm';
 }
 
+/** Format seconds → human-readable duration string (e.g. "2 min", "1 h 15 min"). */
+function fmtEta(seconds) {
+  if (!isFinite(seconds) || seconds <= 0) return null;
+  const mins = Math.round(seconds / 60);
+  if (mins < 1)  return '<1\u202fmin';
+  if (mins < 60) return `${mins}\u202fmin`;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return m > 0 ? `${h}\u202fh\u202f${m}\u202fmin` : `${h}\u202fh`;
+}
+
+/**
+ * Compute the current speed in m/s from the last 10 seconds of GPS history
+ * stored in driveState.gpsHistory. Returns null if there is not enough data.
+ */
+function computeSpeed() {
+  if (!driveState || !driveState.gpsHistory || driveState.gpsHistory.length < 2) return null;
+  const history = driveState.gpsHistory;
+  const latest  = history[history.length - 1].ts;
+  const cutoff  = latest - 10000; // 10 seconds before the most recent sample
+  const recent  = history.filter(p => p.ts >= cutoff);
+  if (recent.length < 2) return null;
+  const first = recent[0];
+  const last  = recent[recent.length - 1];
+  const dt = (last.ts - first.ts) / 1000; // seconds
+  if (dt < 0.5) return null;
+  const dist = turf.distance(
+    [first.lng, first.lat],
+    [last.lng,  last.lat],
+    { units: 'meters' },
+  );
+  return dist / dt; // m/s
+}
+
 /** Generate a small collision-free unique ID. */
 function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2);
@@ -646,7 +680,7 @@ function startDrive() {
   const trip = trips.find(t => t.id === tripId);
   if (!trip || trip.waypoints.length < 2) return;
 
-  driveState = { tripId, watchId: null, posLatLng: null, lastInfo: null, testMode: false };
+  driveState = { tripId, watchId: null, posLatLng: null, lastInfo: null, testMode: false, gpsHistory: [] };
 
   $('#drive-idle-section').addClass('hidden');
   $('#drive-status-section').removeClass('hidden');
@@ -703,6 +737,11 @@ function onGpsUpdate(geoPos, fromTest = false) {
   const posLL = L.latLng(geoPos.coords.latitude, geoPos.coords.longitude);
   driveState.posLatLng = posLL;
 
+  // ── Update GPS history for speed calculation (keep last 15 s)
+  const now = Date.now();
+  driveState.gpsHistory.push({ ts: now, lat: posLL.lat, lng: posLL.lng });
+  driveState.gpsHistory = driveState.gpsHistory.filter(p => now - p.ts <= 15000);
+
   // ── GPS label
   const acc = geoPos.coords.accuracy;
   if (fromTest) {
@@ -742,6 +781,10 @@ function onGpsUpdate(geoPos, fromTest = false) {
     driveNearestMarker.setLatLng(info.nearestLatLng);
   }
 
+  // ── Speed
+  const speedMs  = computeSpeed(); // m/s or null
+  const speedKmh = speedMs !== null ? speedMs * 3.6 : null;
+
   // ── Progress stats
   const pct       = info.totalDist > 0 ? (info.distAlong / info.totalDist) * 100 : 0;
   const remaining = info.totalDist - info.distAlong;
@@ -750,6 +793,7 @@ function onGpsUpdate(geoPos, fromTest = false) {
   $('#stat-progress').text(fmtDist(info.distAlong));
   $('#stat-remaining').text(fmtDist(remaining));
   $('#stat-total').text(fmtDist(info.totalDist));
+  $('#stat-speed').text(speedKmh !== null ? `${Math.round(speedKmh)}\u202fkm/h` : '—');
   $('#progress-bar').css('width', pct.toFixed(1) + '%');
 
   // ── Upcoming waypoints (up to 3)
@@ -764,6 +808,10 @@ function onGpsUpdate(geoPos, fromTest = false) {
       const $li = $('<li class="upcoming-item">')
         .append(`<span class="up-name">${wp.name || 'Waypoint'}</span>`)
         .append(`<span class="up-dist">in ${fmtDist(dist)}</span>`);
+      if (speedMs !== null && speedMs > 0.5) {
+        const etaStr = fmtEta(dist / speedMs);
+        if (etaStr) $li.append(`<span class="up-eta">ETA: ${etaStr}</span>`);
+      }
       if (wp.desc) $li.append(`<span class="up-desc">${wp.desc}</span>`);
       $list.append($li);
     });
