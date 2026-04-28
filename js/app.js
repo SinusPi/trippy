@@ -1149,7 +1149,7 @@ function buildMetroVerticalSvg(trip, info) {
   const wps = trip.waypoints;
   const n   = wps.length;
 
-  const { segDists, totalDist } = computeSegmentDistances(wps);
+  const { segDists, cumDist, totalDist } = computeSegmentDistances(wps);
 
   // ── Collapse unnamed intermediate waypoints ────────────────
   // Only named waypoints + the two endpoints are shown on the vertical metro.
@@ -1280,7 +1280,7 @@ function buildMetroVerticalSvg(trip, info) {
     }));
   }
 
-  return { svg, dotY, SVG_H, posY, cumDist };
+  return { svg, dotY, SVG_H, posY, cumDist, collCumDist };
 }
 
 /**
@@ -1308,7 +1308,7 @@ function renderMetroVertical(trip, info) {
     return;
   }
 
-  const { svg, dotY, SVG_H, posY, cumDist } = buildMetroVerticalSvg(trip, info);
+  const { svg, dotY, SVG_H, posY, cumDist, collCumDist } = buildMetroVerticalSvg(trip, info);
 
   // ── Assemble: SVG + absolutely-positioned info divs ───────
   $inner.empty().css('height', SVG_H + 'px');
@@ -1325,12 +1325,12 @@ function renderMetroVertical(trip, info) {
     const isEndpoint = isFirst || isLast;
     if (!wp.name && !isEndpoint) return;
 
-    const $div = $('<div class="mv-info-div">').css('top', dotY[vi] + 'px');
+    const $div = $('<div class="mv-info-div">').css('top', dotY[idx] + 'px');
     const displayName = wp.name || (isFirst ? 'Start' : 'Destination');
     $div.append($('<span class="mv-name">').text(displayName));
 
     if (info) {
-      const dist = collCumDist[vi] - info.distAlong;
+      const dist = collCumDist[idx] - info.distAlong;
       if (dist > WAYPOINT_HERE_THRESHOLD) {
         $div.append($('<span class="mv-dist">').text('in ' + fmtDist(dist)));
         if (routeSpeedMs !== null && routeSpeedMs > MIN_SPEED_FOR_ETA_MPS) {
@@ -1341,8 +1341,8 @@ function renderMetroVertical(trip, info) {
         $div.append($('<span class="mv-dist here">').text('● here'));
       }
     } else {
-      if (collCumDist[vi] > 0) {
-        $div.append($('<span class="mv-dist">').text(fmtDist(collCumDist[vi]) + ' from start'));
+      if (collCumDist[idx] > 0) {
+        $div.append($('<span class="mv-dist">').text(fmtDist(collCumDist[idx]) + ' from start'));
       }
     }
 
