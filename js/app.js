@@ -1,6 +1,40 @@
 'use strict';
 
 // ═══════════════════════════════════════════
+// TYPES
+// ═══════════════════════════════════════════
+
+/**
+ * A single stop on a route.
+ * @typedef {{ id: string, lat: number, lng: number, name: string, desc: string }} Waypoint
+ */
+
+/**
+ * A named route consisting of an ordered list of waypoints.
+ * @typedef {{ id: string, name: string, waypoints: Waypoint[] }} Trip
+ */
+
+/**
+ * Pre-computed segment geometry for a waypoint array.
+ * @typedef {{ segDists: number[], cumDist: number[], totalDist: number }} SegData
+ */
+
+/**
+ * Result of nearestOnPath().
+ * @typedef {{
+ *   nearestLatLng:   L.LatLng,
+ *   distAlong:       number,
+ *   totalDist:       number,
+ *   segIdx:          number,
+ *   segT:            number,
+ *   distFromPath:    number,
+ *   cumDist:         number[],
+ *   segDists:        number[],
+ *   upcomingIndices: number[],
+ * }} PathInfo
+ */
+
+// ═══════════════════════════════════════════
 // UTILITIES
 // ═══════════════════════════════════════════
 
@@ -241,6 +275,8 @@ function uniqueTripName(baseName) {
 /**
  * Validate and extract only the expected fields from an imported waypoint object.
  * A fresh ID is always generated for each waypoint to prevent ID collisions.
+ * @param {object} w — raw deserialized object
+ * @returns {Waypoint}
  */
 function sanitizeWaypoint(w) {
   return {
@@ -381,8 +417,8 @@ let driveNearestMarker  = null;
  * Compute per-segment distances (metres) and cumulative distances for a
  * sequence of waypoints.  Uses turf.js for geospatial accuracy.
  *
- * @param {Array<{ lat: number, lng: number }>} waypoints
- * @returns {{ segDists: number[], cumDist: number[], totalDist: number }}
+ * @param {Waypoint[]} waypoints
+ * @returns {SegData}
  */
 function computeSegmentDistances(waypoints) {
   const n        = waypoints.length;
@@ -413,6 +449,10 @@ function computeSegmentDistances(waypoints) {
  *   upcomingIndices – waypoint indices whose cumDist > distAlong
  *
  * Uses turf.js for accurate geospatial calculations on great-circle paths.
+ *
+ * @param {L.LatLng}   posLatLng
+ * @param {Waypoint[]} waypoints
+ * @returns {PathInfo|null}
  */
 function nearestOnPath(posLatLng, waypoints) {
   if (!waypoints || waypoints.length < 2) return null;
@@ -920,9 +960,9 @@ function onTestPositionClick(latlng) {
  * Build and return the horizontal metro-line SVG element for the given trip
  * and (optional) position info.  Pure DOM function – no jQuery dependency.
  *
- * @param {object}      trip     – the trip object (with waypoints)
- * @param {object|null} info     – result of nearestOnPath(), or null if no GPS yet
- * @param {object}      segData  – { segDists, totalDist } from computeSegmentDistances()
+ * @param {Trip}          trip
+ * @param {PathInfo|null} info     — null if no GPS fix yet
+ * @param {SegData}       segData
  * @returns {SVGElement}
  */
 function buildMetroLineSvg(trip, info, segData) {
@@ -1110,8 +1150,9 @@ function buildMetroLineSvg(trip, info, segData) {
 /**
  * Renders an SVG "metro-line" style progress strip into #metro-line-container.
  *
- * @param {object}      trip  – the trip object (with waypoints)
- * @param {object|null} info  – result of nearestOnPath(), or null if no GPS yet
+ * @param {Trip}          trip
+ * @param {PathInfo|null} info     — null if no GPS fix yet
+ * @param {SegData}       segData
  */
 function renderMetroLine(trip, info, segData) {
   const $container = $('#metro-line-container');
@@ -1144,9 +1185,9 @@ function refreshMetroLine() {
  * position marker) for the given trip and (optional) position info.
  * Pure DOM function – no jQuery dependency.
  *
- * @param {object}      trip     – the trip object (with waypoints)
- * @param {object|null} info     – result of nearestOnPath(), or null if no GPS yet
- * @param {object}      segData  – { segDists, cumDist, totalDist } from computeSegmentDistances()
+ * @param {Trip}          trip
+ * @param {PathInfo|null} info     — null if no GPS fix yet
+ * @param {SegData}       segData
  * @returns {{ svg: SVGElement, dotY: number[], SVG_H: number, posY: number|null, cumDist: number[] }}
  */
 function buildMetroVerticalSvg(trip, info, segData) {
@@ -1300,8 +1341,9 @@ function buildMetroVerticalSvg(trip, info, segData) {
  *   – proportional: dot y-positions mirror real inter-waypoint distances
  *   – even: dots are equally spaced regardless of distance
  *
- * @param {object}      trip  – the trip object (with waypoints)
- * @param {object|null} info  – result of nearestOnPath(), or null if no GPS yet
+ * @param {Trip}          trip
+ * @param {PathInfo|null} info     — null if no GPS fix yet
+ * @param {SegData}       segData
  */
 function renderMetroVertical(trip, info, segData) {
   const $section = $('#metro-v-section');
