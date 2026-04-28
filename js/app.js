@@ -490,7 +490,10 @@ function renderWaypointList() {
 function openTripEdit(id) {
   editTripId = id;
   const trip = getEditTrip();
-  if (!trip) { closeTripEdit(); return; }
+  if (!trip) {
+    closeTripEdit();
+    return;
+  }
 
   $('#edit-no-trip-msg').addClass('hidden');
   $('#trip-edit-section').removeClass('hidden');
@@ -622,11 +625,14 @@ function populateTripSelector() {
 function updateDriveIdleSection() {
   const tripId = $('#trip-selector').val();
   const trip   = trips.find(t => t.id === tripId);
+  let msg = null;
   if (!tripId || !trip) {
-    $('#drive-idle-msg').text('Select a trip above to start driving.').removeClass('hidden');
-    $('#btn-start-drive').addClass('hidden');
+    msg = 'Select a trip above to start driving.';
   } else if (trip.waypoints.length < 2) {
-    $('#drive-idle-msg').text('This trip needs at least 2 waypoints to drive.').removeClass('hidden');
+    msg = 'This trip needs at least 2 waypoints to drive.';
+  }
+  if (msg !== null) {
+    $('#drive-idle-msg').text(msg).removeClass('hidden');
     $('#btn-start-drive').addClass('hidden');
   } else {
     $('#drive-idle-msg').addClass('hidden');
