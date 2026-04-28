@@ -46,6 +46,24 @@ body {
 #sidebar header h1 { font-size: 20px; }
 #sidebar header .subtitle { font-size: 11px; opacity: 0.85; margin-top: 2px; }
 
+/* Trip selector at top */
+#trip-top-section {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.btn-row {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-row .action-btn {
+  flex: 1;
+}
+
 /* Mode tabs */
 #mode-tabs {
   display: flex;

@@ -21,6 +21,17 @@
     <p class="subtitle">Route Progress Tracker</p>
   </header>
 
+  <!-- Trip selector (shared across modes) -->
+  <section id="trip-top-section">
+    <select id="trip-selector">
+      <option value="">-- select a trip --</option>
+    </select>
+    <div class="btn-row">
+      <button id="btn-new-trip" class="action-btn">+ New Trip</button>
+      <button id="btn-import-text" class="action-btn secondary">📋 Import…</button>
+    </div>
+  </section>
+
   <!-- Mode tabs -->
   <div id="mode-tabs">
     <button id="btn-edit-mode"   class="tab-btn active">✏️ Edit</button>
@@ -30,16 +41,10 @@
   <!-- ── EDIT PANEL ── -->
   <div id="edit-panel" class="panel">
 
-    <section id="trip-list-section">
-      <h2>Trips</h2>
-      <ul id="trip-list"></ul>
-      <button id="btn-new-trip" class="action-btn full-width">+ New Trip</button>
-      <button id="btn-import-text" class="action-btn secondary full-width">📋 Import from text…</button>
-    </section>
+    <p id="edit-no-trip-msg" class="hint">Select or create a trip above to begin editing.</p>
 
     <section id="trip-edit-section" class="hidden">
       <div class="section-header">
-        <button id="btn-back-to-list" class="icon-btn" title="Back">◀</button>
         <h2 id="trip-edit-title">Edit Trip</h2>
         <button id="btn-export-trip" class="icon-btn" title="Share trip URL">📤</button>
         <button id="btn-delete-trip" class="icon-btn danger" title="Delete trip">🗑</button>
@@ -59,12 +64,9 @@
   <!-- ── DRIVE PANEL ── -->
   <div id="drive-panel" class="panel hidden">
 
-    <section id="trip-select-section">
-      <h2>Select Trip</h2>
-      <select id="trip-selector">
-        <option value="">-- choose a trip --</option>
-      </select>
-      <button id="btn-start-drive" class="action-btn full-width" disabled>Start Driving</button>
+    <section id="drive-idle-section">
+      <p id="drive-idle-msg" class="hint">Select a trip above to start driving.</p>
+      <button id="btn-start-drive" class="action-btn full-width hidden">Start Driving</button>
     </section>
 
     <section id="drive-status-section" class="hidden">
