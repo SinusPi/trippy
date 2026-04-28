@@ -934,6 +934,9 @@ function renderMetroLine(trip, info) {
   const visWps = visIdx.map(i => wps[i]);
   const nv     = visWps.length;
 
+  // nv >= 2 is guaranteed by the length check above, but guard defensively.
+  if (nv < 2) { $container.empty(); return; }
+
   // Collapsed segment distances: sum original segments between adjacent visible wps
   const collSegDists = [];
   for (let vi = 0; vi < nv - 1; vi++) {
@@ -1159,6 +1162,9 @@ function renderMetroVertical(trip, info) {
   }, []);
   const visWps = visIdx.map(i => wps[i]);
   const nv     = visWps.length;
+
+  // nv >= 2 is guaranteed by the length check above, but guard defensively.
+  if (nv < 2) { $section.addClass('hidden'); return; }
 
   // Collapsed segment distances: sum original segments between adjacent visible wps
   const collSegDists = [];
