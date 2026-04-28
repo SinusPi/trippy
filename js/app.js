@@ -469,22 +469,8 @@ function renderEditMap(rezoom=true) {
 // ═══════════════════════════════════════════
 
 function renderTripList() {
-  const $list = $('#trip-list').empty();
-  if (trips.length === 0) {
-    $list.append(
-      '<li style="color:var(--muted);font-size:13px;padding:8px 0">' +
-      'No trips yet. Click "+ New Trip" to create one.</li>',
-    );
-    return;
-  }
-  trips.forEach(trip => {
-    const n = trip.waypoints.length;
-    $('<li class="trip-item">')
-      .append(`<span class="trip-name">${trip.name || 'Unnamed Trip'}</span>`)
-      .append(`<span class="trip-meta">${n} waypoint${n !== 1 ? 's' : ''}</span>`)
-      .on('click', () => openTripEdit(trip.id))
-      .appendTo($list);
-  });
+  // Kept for backward compatibility (called by import handlers); delegates to populateTripSelector.
+  populateTripSelector();
 }
 
 function renderWaypointList() {
@@ -504,12 +490,16 @@ function renderWaypointList() {
 function openTripEdit(id) {
   editTripId = id;
   const trip = getEditTrip();
-  if (!trip) return;
+  if (!trip) {
+    closeTripEdit();
+    return;
+  }
 
-  $('#trip-list-section').addClass('hidden');
+  $('#edit-no-trip-msg').addClass('hidden');
   $('#trip-edit-section').removeClass('hidden');
   $('#trip-edit-title').text(trip.name || 'Unnamed Trip');
   $('#trip-name-input').val(trip.name || '');
+  $('#trip-selector').val(id);
   renderWaypointList();
   renderEditMap(true); // DO rezoom when opening a trip, to frame all its waypoints nicely
 }
@@ -518,8 +508,8 @@ function closeTripEdit() {
   editTripId = null;
   clearEditLayers();
   $('#trip-edit-section').addClass('hidden');
-  $('#trip-list-section').removeClass('hidden');
-  renderTripList();
+  $('#edit-no-trip-msg').removeClass('hidden');
+  populateTripSelector();
 }
 
 // ═══════════════════════════════════════════
@@ -616,17 +606,38 @@ function renderDriveMap(trip) {
 // ═══════════════════════════════════════════
 
 function populateTripSelector() {
-  const $sel = $('#trip-selector').empty();
-  $sel.append('<option value="">-- choose a trip --</option>');
+  const $sel = $('#trip-selector');
+  const prevVal = $sel.val();
+  $sel.empty().append('<option value="">-- select a trip --</option>');
   trips.forEach(trip => {
-    if (trip.waypoints.length >= 2) {
-      $sel.append(
-        `<option value="${trip.id}">${trip.name || 'Unnamed Trip'} ` +
-        `(${trip.waypoints.length} waypoints)</option>`,
-      );
-    }
+    const n = trip.waypoints.length;
+    $sel.append(
+      `<option value="${trip.id}">${trip.name || 'Unnamed Trip'} ` +
+      `(${n} waypoint${n !== 1 ? 's' : ''})</option>`,
+    );
   });
-  $('#btn-start-drive').prop('disabled', true);
+  // Restore previous selection if the trip still exists.
+  if (prevVal && trips.find(t => t.id === prevVal)) {
+    $sel.val(prevVal);
+  }
+}
+
+function updateDriveIdleSection() {
+  const tripId = $('#trip-selector').val();
+  const trip   = trips.find(t => t.id === tripId);
+  let msg = null;
+  if (!tripId || !trip) {
+    msg = 'Select a trip above to start driving.';
+  } else if (trip.waypoints.length < 2) {
+    msg = 'This trip needs at least 2 waypoints to drive.';
+  }
+  if (msg !== null) {
+    $('#drive-idle-msg').text(msg).removeClass('hidden');
+    $('#btn-start-drive').addClass('hidden');
+  } else {
+    $('#drive-idle-msg').addClass('hidden');
+    $('#btn-start-drive').removeClass('hidden');
+  }
 }
 
 function startDrive() {
@@ -637,7 +648,7 @@ function startDrive() {
 
   driveState = { tripId, watchId: null, posLatLng: null, lastInfo: null, testMode: false };
 
-  $('#trip-select-section').addClass('hidden');
+  $('#drive-idle-section').addClass('hidden');
   $('#drive-status-section').removeClass('hidden');
   $('#drive-trip-name').text(trip.name || 'Unnamed Trip');
   $('#btn-test-mode').text('🧪 Test mode: Off').addClass('secondary');
@@ -673,9 +684,13 @@ function stopDrive() {
 
   $('#btn-test-mode').text('🧪 Test mode: Off').addClass('secondary');
   $('#drive-status-section').addClass('hidden');
-  $('#trip-select-section').removeClass('hidden');
   $('#metro-section').addClass('hidden');
   $('#metro-line-container').empty();
+
+  if (mode === 'drive') {
+    $('#drive-idle-section').removeClass('hidden');
+    updateDriveIdleSection();
+  }
 }
 
 function onGpsUpdate(geoPos, fromTest = false) {
@@ -967,23 +982,37 @@ $(function () {
 
   // ── Mode tabs ──────────────────────────────────────────────
   $('#btn-edit-mode').on('click', () => {
-    if (driveState) return; // don't switch while driving
+    if (driveState) stopDrive();
     mode = 'edit';
     $('#btn-edit-mode').addClass('active');
     $('#btn-drive-mode').removeClass('active');
     $('#edit-panel').removeClass('hidden');
     $('#drive-panel').addClass('hidden');
-    closeTripEdit();
+    // Open the selected trip in edit view (if any)
+    const tripId = $('#trip-selector').val();
+    if (tripId) {
+      openTripEdit(tripId);
+    }
   });
 
   $('#btn-drive-mode').on('click', () => {
+    if (driveState) return; // already driving
     mode = 'drive';
     $('#btn-drive-mode').addClass('active');
     $('#btn-edit-mode').removeClass('active');
     $('#drive-panel').removeClass('hidden');
     $('#edit-panel').addClass('hidden');
-    if (!driveState) closeTripEdit();
-    populateTripSelector();
+    clearEditLayers();
+    // Auto-start driving if a valid trip is selected
+    const tripId = $('#trip-selector').val();
+    const trip   = trips.find(t => t.id === tripId);
+    if (tripId && trip && trip.waypoints.length >= 2) {
+      startDrive();
+    } else {
+      $('#drive-status-section').addClass('hidden');
+      $('#drive-idle-section').removeClass('hidden');
+      updateDriveIdleSection();
+    }
   });
 
   // ── Edit — new trip ────────────────────────────────────────
@@ -991,6 +1020,14 @@ $(function () {
     const trip = { id: uid(), name: 'New Trip', waypoints: [] };
     trips.push(trip);
     saveTrips(trips);
+    populateTripSelector();
+    // Switch to edit mode for the new trip
+    if (driveState) stopDrive();
+    mode = 'edit';
+    $('#btn-edit-mode').addClass('active');
+    $('#btn-drive-mode').removeClass('active');
+    $('#edit-panel').removeClass('hidden');
+    $('#drive-panel').addClass('hidden');
     openTripEdit(trip.id);
   });
 
@@ -1101,15 +1138,15 @@ $(function () {
     }
   });
 
-  // ── Edit — back / delete ───────────────────────────────────
-  $('#btn-back-to-list').on('click', closeTripEdit);
-
+  // ── Edit — delete ─────────────────────────────────────────
   $('#btn-delete-trip').on('click', () => {
     if (!editTripId) return;
     if (!confirm('Delete this trip and all its waypoints?')) return;
     trips = trips.filter(t => t.id !== editTripId);
     saveTrips(trips);
     closeTripEdit();
+    // Clear selector since the trip is now gone
+    $('#trip-selector').val('');
   });
 
   // ── Edit — trip name ───────────────────────────────────────
@@ -1119,7 +1156,9 @@ $(function () {
     trip.name = $(this).val().trim();
     $('#trip-edit-title').text(trip.name || 'Unnamed Trip');
     saveTrips(trips);
-    renderTripList();
+    populateTripSelector();
+    // Restore selection after repopulating
+    $('#trip-selector').val(editTripId);
   });
 
   // ── Edit — click map to add waypoint ──────────────────────
@@ -1152,7 +1191,23 @@ $(function () {
 
   // ── Drive ─────────────────────────────────────────────────
   $('#trip-selector').on('change', function () {
-    $('#btn-start-drive').prop('disabled', !$(this).val());
+    const tripId = $(this).val();
+    if (mode === 'edit') {
+      if (tripId) {
+        openTripEdit(tripId);
+      } else {
+        closeTripEdit();
+      }
+    } else if (mode === 'drive') {
+      if (driveState) stopDrive();
+      const trip = trips.find(t => t.id === tripId);
+      if (tripId && trip && trip.waypoints.length >= 2) {
+        startDrive();
+      } else {
+        $('#drive-idle-section').removeClass('hidden');
+        updateDriveIdleSection();
+      }
+    }
   });
 
   $('#btn-start-drive').on('click', startDrive);
@@ -1189,6 +1244,6 @@ $(function () {
   });
 
   // ── Initialise ────────────────────────────────────────────
-  renderTripList();
+  populateTripSelector();
   importTripFromUrl();
 });
