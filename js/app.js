@@ -67,6 +67,18 @@ function computeRouteSpeed() {
   return delta / dt; // m/s along the route polyline
 }
 
+/**
+ * Update the GPS indicator dot colour and the coords hover text.
+ * @param {'pending'|'error'|'low'|'high'|'test'} state
+ * @param {string} text – shown on hover
+ */
+function setGpsStatus(state, text) {
+  $('#gps-dot')
+    .removeClass('gps-dot--pending gps-dot--error gps-dot--low gps-dot--high gps-dot--test')
+    .addClass('gps-dot--' + state);
+  $('#gps-coords').text(text || '');
+}
+
 /** Generate a small collision-free unique ID. */
 function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2);
@@ -722,8 +734,8 @@ function startDrive() {
   $('#drive-idle-section').addClass('hidden');
   $('#drive-status-section').removeClass('hidden');
   $('#drive-trip-name').text(trip.name || 'Unnamed Trip');
-  $('#btn-test-mode').text('🧪 Test mode: Off').addClass('secondary');
-  $('#gps-label').text('Acquiring GPS…');
+  $('#btn-test-mode').removeClass('active').attr('title', 'Test mode: off');
+  setGpsStatus('pending', 'Acquiring GPS…');
   $('#progress-card').addClass('hidden');
   $('#upcoming-waypoints').addClass('hidden');
   $('#metro-section').addClass('hidden');
@@ -739,13 +751,13 @@ function startDrive() {
   renderMetroVertical(trip, null);
 
   if (!navigator.geolocation) {
-    $('#gps-label').text('GPS not supported by this browser.');
+    setGpsStatus('error', 'GPS not supported');
     return;
   }
 
   driveState.watchId = navigator.geolocation.watchPosition(
     pos  => onGpsUpdate(pos),
-    err  => { $('#gps-label').text('GPS error: ' + err.message); },
+    err  => { setGpsStatus('error', 'GPS error'); },
     { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 },
   );
 }
@@ -757,7 +769,7 @@ function stopDrive() {
   driveState = null;
   clearDriveLayers();
 
-  $('#btn-test-mode').text('🧪 Test mode: Off').addClass('secondary');
+  $('#btn-test-mode').removeClass('active').attr('title', 'Test mode: off');
   $('#drive-status-section').addClass('hidden');
   $('#metro-section').addClass('hidden');
   $('#metro-line-container').empty();
@@ -787,18 +799,13 @@ function onGpsUpdate(geoPos, fromTest = false) {
   driveState.gpsHistory = driveState.gpsHistory.filter(p => now - p.ts <= 15000);
   // distAlong will be added to the latest entry after nearestOnPath() is called below
 
-  // ── GPS label
+  // ── GPS indicator
   const acc = geoPos.coords.accuracy;
   if (fromTest) {
-    $('#gps-label').html(
-      `<span class="test-badge">🧪</span> ` +
-      `${posLL.lat.toFixed(5)}, ${posLL.lng.toFixed(5)}`,
-    );
+    setGpsStatus('test', `${posLL.lat.toFixed(5)}, ${posLL.lng.toFixed(5)}`);
   } else {
-    $('#gps-label').html(
-      `${posLL.lat.toFixed(5)}, ${posLL.lng.toFixed(5)} ` +
-      `<small style="color:var(--muted)">±${Math.round(acc)}\u202fm</small>`,
-    );
+    const gpsState = acc <= 25 ? 'high' : 'low';
+    setGpsStatus(gpsState, `${posLL.lat.toFixed(5)}, ${posLL.lng.toFixed(5)}  ±${Math.round(acc)}\u202fm`);
   }
 
   // ── Position marker on map
@@ -1579,11 +1586,11 @@ $(function () {
     if (!driveState) return;
     driveState.testMode = !driveState.testMode;
     if (driveState.testMode) {
-      $(this).text('🧪 Test mode: On').removeClass('secondary');
-      $('#gps-label').text('Click the map to set a test position…');
+      $(this).addClass('active').attr('title', 'Test mode: on');
+      setGpsStatus('pending', 'Click the map to set a test position…');
     } else {
-      $(this).text('🧪 Test mode: Off').addClass('secondary');
-      $('#gps-label').text('Acquiring GPS…');
+      $(this).removeClass('active').attr('title', 'Test mode: off');
+      setGpsStatus('pending', 'Acquiring GPS…');
     }
   });
 

@@ -232,12 +232,43 @@ textarea { resize: vertical; }
 }
 
 /* GPS status */
-#gps-status { flex-direction: row; align-items: center; gap: 10px; }
-#gps-status .label { font-size: 12px; color: var(--muted); }
-#gps-status .value { font-size: 13px; font-weight: 500; }
-
-/* Test mode badge inside GPS label */
-.test-badge { font-size: 12px; }
+#gps-status {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+}
+.gps-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.gps-dot--pending { background: #94a3b8; animation: gps-pulse 2s ease-in-out infinite; }
+.gps-dot--error   { background: #ef4444; animation: none; }
+.gps-dot--low     { background: #93c5fd; animation: none; }
+.gps-dot--high    { background: #2563eb; animation: none; }
+.gps-dot--test    { background: #f59e0b; animation: none; }
+@keyframes gps-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.25; }
+}
+.gps-coords {
+  flex: 1;
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+#gps-status:hover .gps-coords { opacity: 1; }
+.icon-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
 
 /* Upcoming waypoints list */
 .upcoming-item {
