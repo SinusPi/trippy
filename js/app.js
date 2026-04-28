@@ -434,7 +434,7 @@ function nearestOnPath(posLatLng, waypoints) {
   // Waypoints whose cumulative distance is strictly ahead of our position
   const upcomingIndices = [];
   for (let i = 1; i < n; i++) {
-    if (cumDist[i] > distAlong + WAYPOINT_PROXIMITY_THRESHOLD && waypoints[i].name) upcomingIndices.push(i);
+    if (cumDist[i] > distAlong + WAYPOINT_PROXIMITY_THRESHOLD && (waypoints[i].name || i === n - 1)) upcomingIndices.push(i);
   }
 
   return {
@@ -833,15 +833,17 @@ function onGpsUpdate(geoPos, fromTest = false) {
 
   // ── Upcoming waypoints (up to 3)
   const upcoming = info.upcomingIndices.slice(0, 3).map(i => ({
+    i,
     wp:   trip.waypoints[i],
     dist: info.cumDist[i] - info.distAlong,
   }));
 
   if (upcoming.length > 0) {
     const $list = $('#upcoming-list').empty();
-    upcoming.forEach(({ wp, dist }) => {
+    upcoming.forEach(({ i, wp, dist }) => {
+      const displayName = wp.name || 'Destination';
       const $li = $('<li class="upcoming-item">')
-        .append(`<span class="up-name">${wp.name || 'Waypoint'}</span>`)
+        .append(`<span class="up-name">${displayName}</span>`)
         .append(`<span class="up-dist">in ${fmtDist(dist)}</span>`);
       if (routeSpeedMs !== null && routeSpeedMs > 0.5) {
         const etaStr = fmtEta(dist / routeSpeedMs);
@@ -990,10 +992,11 @@ function renderMetroLine(trip, info) {
 
   // ── Waypoint dots + labels ──
   fractions.forEach((frac, idx) => {
-    const cx      = PAD_H + TRACK_W * frac;
-    const passed  = isPassed(idx);
+    const cx         = PAD_H + TRACK_W * frac;
+    const passed     = isPassed(idx);
+    const isEndpoint = idx === 0 || idx === n - 1;
 
-    if (!wps[idx].name) return; // skip dots and labels for unnamed waypoints to reduce clutter
+    if (!wps[idx].name && !isEndpoint) return; // skip dots and labels for unnamed waypoints to reduce clutter
 
     // Dot
     svg.appendChild(el('circle', {
@@ -1003,20 +1006,22 @@ function renderMetroLine(trip, info) {
       'stroke-width': 2.5,
     }));
 
-    // Label: even indices above, odd below
-    const above   = idx % 2 === 0;
-    const labelY  = above
-      ? TRACK_Y - DOT_R - 6
-      : TRACK_Y + DOT_R + 14;
-    const label   = wps[idx].name || `WP ${idx + 1}`;
+    // Label: even indices above, odd below (only if named)
+    if (wps[idx].name) {
+      const above   = idx % 2 === 0;
+      const labelY  = above
+        ? TRACK_Y - DOT_R - 6
+        : TRACK_Y + DOT_R + 14;
+      const label   = wps[idx].name;
 
-    svg.appendChild(el('text', {
-      x: cx, y: labelY,
-      'text-anchor': 'middle', 'font-size': 9.5,
-      fill: passed ? '#2563eb' : '#64748b',
-      'font-weight': passed ? '600' : '400',
-      'font-family': 'system-ui,sans-serif',
-    }, label.length > 10 ? label.slice(0, 9) + '…' : label));
+      svg.appendChild(el('text', {
+        x: cx, y: labelY,
+        'text-anchor': 'middle', 'font-size': 9.5,
+        fill: passed ? '#2563eb' : '#64748b',
+        'font-weight': passed ? '600' : '400',
+        'font-family': 'system-ui,sans-serif',
+      }, label.length > 10 ? label.slice(0, 9) + '…' : label));
+    }
   });
 
   // ── Position indicator (filled circle + blinking ring) ──
