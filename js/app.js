@@ -25,7 +25,7 @@
  *   tripId:     string,
  *   watchId:    number|null,
  *   posLatLng:  L.LatLng|null,
- *   lastInfo:   PathPositionInfo|null,
+ *   lastPositionInfo:   PathPositionInfo|null,
  *   testMode:   boolean,
  *   gpsHistory: Array<{ ts: number, lat: number, lng: number, distAlong?: number }>,
  *   segData:    SegData,
@@ -35,6 +35,7 @@
 /**
  * Result of getPathPositionInfo
  * @typedef {{
+ *   position:        L.LatLng,
  *   nearestLatLng:   L.LatLng,
  *   distAlong:       number,
  *   totalDist:       number,
@@ -540,6 +541,7 @@ function getPathPositionInfo(posLatLng, waypoints) {
   }
 
   return {
+    position:       posLatLng,
     nearestLatLng:  L.latLng(nearest.geometry.coordinates[1], nearest.geometry.coordinates[0]),
     distAlong,
     totalDist,
@@ -582,10 +584,10 @@ function renderEditMap(rezoom=true) {
       L.DomEvent.stopPropagation(e);
       const trip = getEditTrip();
       if (!trip) return;
-      const info = getPathPositionInfo(e.latlng, trip.waypoints);
-      if (!info) return;
-      const wp = { id: uid(), lat: info.nearestLatLng.lat, lng: info.nearestLatLng.lng, name: '', desc: '' };
-      trip.waypoints.splice(info.segIdx + 1, 0, wp);
+      const positionInfo = getPathPositionInfo(e.latlng, trip.waypoints);
+      if (!positionInfo) return;
+      const wp = { id: uid(), lat: positionInfo.nearestLatLng.lat, lng: positionInfo.nearestLatLng.lng, name: '', desc: '' };
+      trip.waypoints.splice(positionInfo.segIdx + 1, 0, wp);
       saveTrips(trips);
       renderWaypointList();
       renderEditMap(false);
@@ -813,7 +815,7 @@ function startDrive() {
   const trip = trips.find(t => t.id === tripId);
   if (!trip || trip.waypoints.length < 2) return;
 
-  driveState = { tripId, watchId: null, posLatLng: null, lastInfo: null, testMode: false, gpsHistory: [],
+  driveState = { tripId, watchId: null, posLatLng: null, lastPositionInfo: null, testMode: false, gpsHistory: [],
                   segData: computeSegmentDistances(trip.waypoints) };
 
   $('#drive-idle-section').addClass('hidden');
@@ -868,6 +870,39 @@ function stopDrive() {
   }
 }
 
+/**
+ * Render the upcoming-waypoints list panel.
+ * @param {Trip} trip
+ * @param {PathPositionInfo} positionInfo
+ * @param {number|null} routeSpeedMs
+ */
+function renderUpcomingWaypoints(trip, positionInfo, routeSpeedMs) {
+  const upcoming = positionInfo.upcomingIndices.slice(0, 3).map(i => ({
+    i,
+    wp:   trip.waypoints[i],
+    dist: positionInfo.cumDist[i] - positionInfo.distAlong,
+  }));
+
+  if (upcoming.length > 0) {
+    const $list = $('#upcoming-list').empty();
+    upcoming.forEach(({ i, wp, dist }) => {
+      const displayName = wp.name || 'Destination';
+      const $li = $('<li class="upcoming-item">')
+        .append(`<span class="up-name">${displayName}</span>`)
+        .append(`<span class="up-dist">in ${fmtDist(dist)}</span>`);
+      if (routeSpeedMs !== null && routeSpeedMs > 0.5) {
+        const etaStr = fmtEta(dist / routeSpeedMs);
+        if (etaStr) $li.append(`<span class="up-eta">ETA: ${etaStr}</span>`);
+      }
+      if (wp.desc) $li.append(`<span class="up-desc">${wp.desc}</span>`);
+      $list.append($li);
+    });
+    $('#upcoming-waypoints').removeClass('hidden');
+  } else {
+    $('#upcoming-waypoints').addClass('hidden');
+  }
+}
+
 function onGpsUpdate(geoPos, fromTest = false) {
   if (!driveState) return;
   // When test mode is active, ignore real GPS updates so the test position sticks
@@ -907,7 +942,7 @@ function onGpsUpdate(geoPos, fromTest = false) {
   // ── Geometry
   const positionInfo = getPathPositionInfo(posLL, trip.waypoints);
   if (!positionInfo) return;
-  driveState.lastInfo = positionInfo;
+  driveState.lastPositionInfo = positionInfo;
 
   // Record distAlong in the latest history entry so computeRouteSpeed() can use it
   driveState.gpsHistory[driveState.gpsHistory.length - 1].distAlong = positionInfo.distAlong;
@@ -938,30 +973,7 @@ function onGpsUpdate(geoPos, fromTest = false) {
   $('#progress-bar').css('width', pct.toFixed(1) + '%');
 
   // ── Upcoming waypoints (up to 3)
-  const upcoming = positionInfo.upcomingIndices.slice(0, 3).map(i => ({
-    i,
-    wp:   trip.waypoints[i],
-    dist: positionInfo.cumDist[i] - positionInfo.distAlong,
-  }));
-
-  if (upcoming.length > 0) {
-    const $list = $('#upcoming-list').empty();
-    upcoming.forEach(({ i, wp, dist }) => {
-      const displayName = wp.name || 'Destination';
-      const $li = $('<li class="upcoming-item">')
-        .append(`<span class="up-name">${displayName}</span>`)
-        .append(`<span class="up-dist">in ${fmtDist(dist)}</span>`);
-      if (routeSpeedMs !== null && routeSpeedMs > 0.5) {
-        const etaStr = fmtEta(dist / routeSpeedMs);
-        if (etaStr) $li.append(`<span class="up-eta">ETA: ${etaStr}</span>`);
-      }
-      if (wp.desc) $li.append(`<span class="up-desc">${wp.desc}</span>`);
-      $list.append($li);
-    });
-    $('#upcoming-waypoints').removeClass('hidden');
-  } else {
-    $('#upcoming-waypoints').addClass('hidden');
-  }
+  renderUpcomingWaypoints(trip, positionInfo, routeSpeedMs);
 
   // ── Metro line
   renderMetroLine(trip, positionInfo, driveState.segData);
@@ -1204,8 +1216,8 @@ function renderMetroLine(trip, info, segData) {
 function refreshMetroLine() {
   if (!driveState) return;
   const trip = trips.find(t => t.id === driveState.tripId);
-  renderMetroLine(trip, driveState.lastInfo, driveState.segData);
-  renderMetroVertical(trip, driveState.lastInfo, driveState.segData);
+  renderMetroLine(trip, driveState.lastPositionInfo, driveState.segData);
+  renderMetroVertical(trip, driveState.lastPositionInfo, driveState.segData);
 }
 
 // ═══════════════════════════════════════════
