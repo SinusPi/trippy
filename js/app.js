@@ -325,12 +325,17 @@ let mode        = 'edit';  // 'edit' | 'drive'
 let editTripId  = null;    // ID of trip currently open in edit mode
 let driveState  = null;    // { tripId, watchId, posLatLng, lastInfo }
 let metroProp   = true;    // true = proportional spacing, false = even spacing
+let metroVScrollPaused = false; // true while the user holds down on the vertical metro scroll box
 
 // ── Layout / geometry constants ────────────────────────────
 /** Tolerance in metres: a waypoint is considered "passed" when distAlong is within this of its cumDist. */
 const WAYPOINT_PROXIMITY_THRESHOLD = 1;
 /** Minimum horizontal pixel span between two waypoints before a distance label is drawn. */
 const MIN_LABEL_WIDTH_PX = 24;
+/** Metres within which the vertical metro shows "● here" instead of a distance for a waypoint. */
+const WAYPOINT_HERE_THRESHOLD_M = 50;
+/** Minimum route-speed (m/s) before ETAs are displayed (~1.8 km/h – avoids noisy ETAs when stationary). */
+const MIN_SPEED_FOR_ETA_MS = 0.5;
 
 // ═══════════════════════════════════════════
 // MAP SETUP
@@ -720,12 +725,16 @@ function startDrive() {
   $('#progress-card').addClass('hidden');
   $('#upcoming-waypoints').addClass('hidden');
   $('#metro-section').addClass('hidden');
+  $('#metro-v-section').addClass('hidden');
 
   renderDriveMap(trip);
 
   // Draw the metro line straight away (without position info)
   renderMetroLine(trip, null);
   $('#metro-section').removeClass('hidden');
+
+  // Draw the vertical metro overview straight away (without position info)
+  renderMetroVertical(trip, null);
 
   if (!navigator.geolocation) {
     $('#gps-label').text('GPS not supported by this browser.');
@@ -750,6 +759,8 @@ function stopDrive() {
   $('#drive-status-section').addClass('hidden');
   $('#metro-section').addClass('hidden');
   $('#metro-line-container').empty();
+  $('#metro-v-section').addClass('hidden');
+  $('#metro-v-inner').empty();
 
   if (mode === 'drive') {
     $('#drive-idle-section').removeClass('hidden');
@@ -859,6 +870,9 @@ function onGpsUpdate(geoPos, fromTest = false) {
 
   // ── Metro line
   renderMetroLine(trip, info);
+
+  // ── Metro vertical
+  renderMetroVertical(trip, info);
 }
 
 /**
@@ -1063,8 +1077,159 @@ function refreshMetroLine() {
 }
 
 // ═══════════════════════════════════════════
-// EVENT BINDINGS  (runs after DOM is ready)
+// METRO VERTICAL
 // ═══════════════════════════════════════════
+
+/**
+ * Renders a vertical "metro-line" style route overview into #metro-v-inner.
+ * Waypoints are evenly spaced vertically (each row has equal height).
+ * Named waypoints and endpoints show their name, distance remaining, ETA and
+ * description; unnamed intermediate waypoints appear as smaller dots only.
+ * A position marker (amber dot) is inserted between the two waypoints that
+ * flank the current GPS location.  The scroll box auto-scrolls to keep the
+ * position marker near the top unless metroVScrollPaused is true.
+ *
+ * @param {object}      trip  – the trip object (with waypoints)
+ * @param {object|null} info  – result of nearestOnPath(), or null if no GPS yet
+ */
+function renderMetroVertical(trip, info) {
+  const $section = $('#metro-v-section');
+  const $inner   = $('#metro-v-inner');
+
+  if (!trip || trip.waypoints.length < 2) {
+    $section.addClass('hidden');
+    return;
+  }
+
+  const wps = trip.waypoints;
+  const n   = wps.length;
+
+  // Use cumDist from the nearestOnPath result when available (avoids recomputing).
+  const cumDist = (info && info.cumDist)
+    ? info.cumDist
+    : (() => {
+        const cd = [0];
+        for (let i = 0; i < n - 1; i++) {
+          cd.push(cd[i] + turf.distance(
+            [wps[i].lng, wps[i].lat],
+            [wps[i + 1].lng, wps[i + 1].lat],
+            { units: 'meters' },
+          ));
+        }
+        return cd;
+      })();
+
+  // Has waypoint idx been passed (i.e. is the current position at or past it)?
+  function isPassed(idx) {
+    return info !== null && cumDist[idx] <= info.distAlong + WAYPOINT_PROXIMITY_THRESHOLD;
+  }
+
+  const routeSpeedMs = computeRouteSpeed();
+  const posSegIdx    = info ? info.segIdx : null; // insert position marker after this index
+
+  $inner.empty();
+  let $posRow = null;
+
+  wps.forEach((wp, idx) => {
+    const passed     = isPassed(idx);
+    const isFirst    = idx === 0;
+    const isLast     = idx === n - 1;
+    const isNamed    = !!(wp.name);
+    const isEndpoint = isFirst || isLast;
+
+    // Top segment (from waypoint idx-1 to idx): passed once we've reached waypoint idx.
+    const topPassed = isPassed(idx);
+    // Bottom segment (from waypoint idx to idx+1): passed once we've passed waypoint idx
+    // (meaning we've started travelling this segment).
+    const botPassed = isPassed(idx) && idx < n - 1;
+
+    const $row = $('<div class="mv-row">');
+
+    // ── Track column ──────────────────────────────────────────
+    const $track = $('<div class="mv-track-col">');
+
+    if (isFirst) {
+      $track.append($('<div>').addClass('mv-seg invisible'));
+    } else {
+      $track.append($('<div>').addClass('mv-seg' + (topPassed ? ' passed' : '')));
+    }
+
+    $track.append($('<div>').addClass(
+      'mv-dot' +
+      (isNamed || isEndpoint ? '' : ' minor') +
+      (passed ? ' passed' : ''),
+    ));
+
+    if (isLast) {
+      $track.append($('<div>').addClass('mv-seg invisible'));
+    } else {
+      $track.append($('<div>').addClass('mv-seg' + (botPassed ? ' passed' : '')));
+    }
+
+    $row.append($track);
+
+    // ── Info column (named waypoints and endpoints only) ──────
+    if (isNamed || isEndpoint) {
+      const $info = $('<div class="mv-info-col">');
+      const displayName = wp.name || (isFirst ? 'Start' : 'Destination');
+      $info.append($('<span class="mv-name">').text(displayName));
+
+      if (info) {
+        const dist = cumDist[idx] - info.distAlong;
+        if (dist > WAYPOINT_HERE_THRESHOLD_M) {
+          $info.append($('<span class="mv-dist">').text('in ' + fmtDist(dist)));
+          if (routeSpeedMs !== null && routeSpeedMs > MIN_SPEED_FOR_ETA_MS) {
+            const etaStr = fmtEta(dist / routeSpeedMs);
+            if (etaStr) $info.append($('<span class="mv-eta">').text('ETA: ' + etaStr));
+          }
+        } else if (dist > -WAYPOINT_HERE_THRESHOLD_M) {
+          $info.append($('<span class="mv-dist here">').text('● here'));
+        }
+      } else {
+        if (cumDist[idx] > 0) {
+          $info.append($('<span class="mv-dist">').text(fmtDist(cumDist[idx]) + ' from start'));
+        }
+      }
+
+      if (wp.desc) {
+        $info.append($('<span class="mv-desc">').text(wp.desc));
+      }
+
+      $row.append($info);
+    }
+
+    $inner.append($row);
+
+    // Insert position marker after waypoint posSegIdx (between posSegIdx and posSegIdx+1).
+    if (info && posSegIdx === idx && idx < n - 1) {
+      $posRow = $('<div class="mv-row">');
+
+      const $posTrack = $('<div class="mv-track-col">');
+      $posTrack.append($('<div>').addClass('mv-seg passed'));
+      $posTrack.append($('<div class="mv-pos-dot">'));
+      $posTrack.append($('<div>').addClass('mv-seg'));
+      $posRow.append($posTrack);
+
+      const $posInfo = $('<div class="mv-info-col">');
+      $posInfo.append($('<span class="mv-you-label">').text('▶ you are here'));
+      $posRow.append($posInfo);
+
+      $inner.append($posRow);
+    }
+  });
+
+  $section.removeClass('hidden');
+
+  // ── Auto-scroll: keep position marker near the top of the visible area ──
+  if ($posRow && !metroVScrollPaused) {
+    const scrollEl = document.getElementById('metro-v-scroll');
+    if (scrollEl) {
+      scrollEl.scrollTop = Math.max(0, $posRow[0].offsetTop - 32);
+    }
+  }
+}
+
+
 
 $(function () {
 
@@ -1330,6 +1495,12 @@ $(function () {
     $('#btn-metro-proportional').removeClass('active');
     refreshMetroLine();
   });
+
+  // ── Metro vertical — pause auto-scroll while the user touches/drags ──
+  // Namespaced so the document handler can be clearly identified (though it is
+  // only ever registered once since this block runs once on DOMContentLoaded).
+  $('#metro-v-scroll').on('mousedown.metroV touchstart.metroV', () => { metroVScrollPaused = true; });
+  $(document).on('mouseup.metroV touchend.metroV', () => { metroVScrollPaused = false; });
 
   // ── Initialise ────────────────────────────────────────────
   populateTripSelector();
