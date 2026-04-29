@@ -436,6 +436,26 @@ group('3. SVG renderings – vertical metro strip (buildMetroVerticalSvg)', () =
     assert(circles.length >= 5, `Expected ≥5 circles with position info, got ${circles.length}`);
   });
 
+  test('unnamed intermediate waypoints are collapsed: dotY and visWps lengths match (label alignment bug)', () => {
+    // A trip where the middle waypoint is unnamed — it must be invisible.
+    // dotY and visWps must both have length 2 (start + end only), so that
+    // dotY[vi] aligns correctly with visWps[vi] in renderMetroVertical.
+    const trip = {
+      name: 'Collapse test',
+      waypoints: [
+        { lat: 0, lng: 0,  name: 'Start', desc: '' },
+        { lat: 1, lng: 1,  name: '',      desc: '' },  // unnamed – must be collapsed
+        { lat: 2, lng: 2,  name: 'End',   desc: '' },
+      ],
+    };
+    const sd = computeSegmentDistances(trip.waypoints);
+    const { dotY, visWps, visIdx } = buildMetroVerticalSvg(trip, null, sd);
+    assert.strictEqual(visWps.length, 2, `Expected 2 visible waypoints, got ${visWps.length}`);
+    assert.strictEqual(dotY.length,   2, `Expected dotY length 2, got ${dotY.length}`);
+    assert.strictEqual(visIdx[0], 0, 'First visible waypoint should be original index 0');
+    assert.strictEqual(visIdx[1], 2, 'Second visible waypoint should be original index 2 (end)');
+  });
+
 });
 
 // ═══════════════════════════════════════════

@@ -1366,7 +1366,7 @@ function buildMetroVerticalSvg(trip, positionInfo, segData) {
     }));
   }
 
-  return { svg, dotY, SVG_H, posY, cumDist, collCumDist };
+  return { svg, dotY, SVG_H, posY, cumDist, collCumDist, visIdx, visWps };
 }
 
 /**
@@ -1395,29 +1395,27 @@ function renderMetroVertical(trip, info, segData) {
     return;
   }
 
-  const { svg, dotY, SVG_H, posY, cumDist, collCumDist } = buildMetroVerticalSvg(trip, info, segData);
+  const { svg, dotY, SVG_H, posY, cumDist, collCumDist, visIdx, visWps } = buildMetroVerticalSvg(trip, info, segData);
 
   // ── Assemble: SVG + absolutely-positioned info divs ───────
   $inner.empty().css('height', SVG_H + 'px');
   $inner.append(svg);
 
-  const wps          = trip.waypoints;
-  const n            = wps.length;
+  const n            = trip.waypoints.length;
   const routeSpeedMs = computeRouteSpeed();
 
-  // Info div for each named waypoint / endpoint, centred on its dot
-  wps.forEach((wp, idx) => {
-    const isFirst    = idx === 0;
-    const isLast     = idx === n - 1;
-    const isEndpoint = isFirst || isLast;
-    if (!wp.name && !isEndpoint) return;
-
-    const $div = $('<div class="mv-info-div">').css('top', dotY[idx] + 'px');
+  // Info div for each visible waypoint, centred on its dot.
+  // visWps / visIdx are indexed by the visual index vi, matching dotY and collCumDist.
+  visWps.forEach((wp, vi) => {
+    const origIdx    = visIdx[vi];
+    const isFirst    = origIdx === 0;
+    const isLast     = origIdx === n - 1;
+    const $div = $('<div class="mv-info-div">').css('top', dotY[vi] + 'px');
     const displayName = wp.name || (isFirst ? 'Start' : 'Destination');
     $div.append($('<span class="mv-name">').text(displayName));
 
     if (info) {
-      const dist = collCumDist[idx] - info.distAlong;
+      const dist = collCumDist[vi] - info.distAlong;
       if (dist > WAYPOINT_HERE_THRESHOLD) {
         $div.append($('<span class="mv-dist">').text('in ' + fmtDist(dist)));
         if (routeSpeedMs !== null && routeSpeedMs > MIN_SPEED_FOR_ETA_MPS) {
@@ -1428,8 +1426,8 @@ function renderMetroVertical(trip, info, segData) {
         $div.append($('<span class="mv-dist here">').text('● here'));
       }
     } else {
-      if (collCumDist[idx] > 0) {
-        $div.append($('<span class="mv-dist">').text(fmtDist(collCumDist[idx]) + ' from start'));
+      if (collCumDist[vi] > 0) {
+        $div.append($('<span class="mv-dist">').text(fmtDist(collCumDist[vi]) + ' from start'));
       }
     }
 
