@@ -1027,7 +1027,7 @@ function onTestPositionClick(latlng) {
  *             collSegDists: number[], collCumDist: number[],
  *             fractions: number[] } | null}
  */
-function computeMetroLayout(mode, wps, segDists) {
+function computeMetroLayout(mode, wps, segDists, info = null) {
   const n      = wps.length;
   const visIdx = wps.reduce((acc, wp, i) => {
     if (wp.name || i === 0 || i === n - 1) acc.push(i);
@@ -1088,17 +1088,31 @@ function computeMetroLayout(mode, wps, segDists) {
     throw new Error(`Invalid metro mode: ${mode}`);
   }
 
-  return { visIdx, visWps, numVisible, collSegDists, collCumDist, fractions };
+  function computeProgressFrac(posInfo) {
+    if (!posInfo) return null;
+    if (mode === 'proportional') {
+      return posInfo.totalDist > 0 ? posInfo.distAlong / posInfo.totalDist : 0;
+    }
+    let vi = 0;
+    while (vi < numVisible - 2 && collCumDist[vi + 1] <= posInfo.distAlong) vi++;
+    const segLen = collCumDist[vi + 1] - collCumDist[vi];
+    const t = segLen > 0 ? Math.min(1, (posInfo.distAlong - collCumDist[vi]) / segLen) : 0;
+    return fractions[vi] + (fractions[vi + 1] - fractions[vi]) * t;
+  }
+
+  const progressFrac = computeProgressFrac(info);
+
+  return { visIdx, visWps, numVisible, collSegDists, collCumDist, fractions, progressFrac };
 }
 
-function buildMetroLineSvg(trip, info, segData) {
+function buildMetroLineSvg(trip, positionInfo, segData) {
   const wps = trip.waypoints;
 
   const { segDists } = segData;
 
-  const layout = computeMetroLayout(metroMode, wps, segDists);
+  const layout = computeMetroLayout(metroMode, wps, segDists, positionInfo);
   if (!layout) { $container.empty(); return; }
-  const { visIdx, visWps, numVisible: nv, collSegDists, collCumDist, fractions } = layout;
+  const { visIdx, visWps, numVisible: nv, collSegDists, collCumDist, fractions, progressFrac } = layout;
 
   // ── Layout constants ───────────────────────────────────────
   // Two rows of labels, above and below the track
@@ -1109,23 +1123,6 @@ function buildMetroLineSvg(trip, info, segData) {
   const DOT_R   = 7;    // waypoint circle radius
   const SVG_H   = 106;  // total SVG height
   const DIST_LABEL_Y = TRACK_Y + DOT_R + 13; // y for inter-segment distance labels
-
-  // Progress fraction (0–1) along the track for current position.
-  // In proportional mode: raw distance ratio.
-  // In even mode: map distAlong into collapsed-segment visual space so the
-  // indicator moves smoothly between visible waypoints regardless of how many
-  // unnamed stops were collapsed together.
-  const progressFrac = info
-    ? (metroMode === 'proportional'
-        ? (info.totalDist > 0 ? info.distAlong / info.totalDist : 0)
-        : (() => {
-            let vi = 0;
-            while (vi < nv - 2 && collCumDist[vi + 1] <= info.distAlong) vi++;
-            const segLen = collCumDist[vi + 1] - collCumDist[vi];
-            const t      = segLen > 0 ? Math.min(1, (info.distAlong - collCumDist[vi]) / segLen) : 0;
-            return fractions[vi] + (fractions[vi + 1] - fractions[vi]) * t;
-          })())
-    : null;
 
   // Has a visible waypoint been passed?
   function isPassed(vi) {
@@ -1278,18 +1275,18 @@ function refreshMetroLine() {
  * Pure DOM function – no jQuery dependency.
  *
  * @param {Trip}          trip
- * @param {PathPositionInfo|null} info     — null if no GPS fix yet
+ * @param {PathPositionInfo|null} positionInfo     — null if no GPS fix yet
  * @param {SegData}       segData
  * @returns {{ svg: SVGElement, dotY: number[], SVG_H: number, posY: number|null, cumDist: number[] }}
  */
-function buildMetroVerticalSvg(trip, info, segData) {
+function buildMetroVerticalSvg(trip, positionInfo, segData) {
   const wps = trip.waypoints;
 
   const { segDists, cumDist } = segData;
 
-  const layout = computeMetroLayout(metroMode, wps, segDists);
+  const layout = computeMetroLayout(metroMode, wps, segDists, positionInfo);
   if (!layout) { $section.addClass('hidden'); return; }
-  const { visIdx, visWps, numVisible: nv, collSegDists, collCumDist, fractions } = layout;
+  const { visIdx, visWps, numVisible: nv, collSegDists, collCumDist, fractions, progressFrac } = layout;
 
 
   // ── Layout constants ───────────────────────────────────────
@@ -1303,31 +1300,13 @@ function buildMetroVerticalSvg(trip, info, segData) {
   const TRACK_H = (nv - 1) * STEP_PX;
   const SVG_H   = PAD_V + TRACK_H + PAD_V;
 
-  // Fraction (0–1) for each visible waypoint along the visual track
-  // (already computed by computeMetroLayout; destructured above)
-
   const dotY = fractions.map(f => PAD_V + f * TRACK_H);
-
-  // Progress fraction along the visual track.
-  // In proportional mode: raw distance ratio.
-  // In even/smart mode: map distAlong into collapsed-segment visual space.
-  const progressFrac = info
-    ? (metroMode === 'proportional'
-        ? (info.totalDist > 0 ? info.distAlong / info.totalDist : 0)
-        : (() => {
-            let vi = 0;
-            while (vi < nv - 2 && collCumDist[vi + 1] <= info.distAlong) vi++;
-            const segLen = collCumDist[vi + 1] - collCumDist[vi];
-            const t      = segLen > 0 ? Math.min(1, (info.distAlong - collCumDist[vi]) / segLen) : 0;
-            return fractions[vi] + (fractions[vi + 1] - fractions[vi]) * t;
-          })())
-    : null;
 
   const posY = progressFrac !== null ? PAD_V + progressFrac * TRACK_H : null;
 
   // Has visible waypoint vi been passed?
   function isPassed(vi) {
-    return info !== null && collCumDist[vi] <= info.distAlong + WAYPOINT_PROXIMITY_THRESHOLD;
+    return positionInfo !== null && collCumDist[vi] <= positionInfo.distAlong + WAYPOINT_PROXIMITY_THRESHOLD;
   }
 
   // ── Build SVG ─────────────────────────────────────────────
