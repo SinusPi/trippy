@@ -96,6 +96,7 @@ const {
   computeMetroLayout,
   buildMetroLineSvg,
   buildMetroVerticalSvg,
+  duplicateTrip,
 } = require('./js/app.js');
 
 // ═══════════════════════════════════════════
@@ -468,6 +469,78 @@ group('3. SVG renderings – vertical metro strip (buildMetroVerticalSvg)', () =
     assert.strictEqual(dotY.length,   2, `Expected dotY length 2, got ${dotY.length}`);
     assert.strictEqual(visIdx[0], 0, 'First visible waypoint should be original index 0');
     assert.strictEqual(visIdx[1], 2, 'Second visible waypoint should be original index 2 (end)');
+  });
+
+});
+
+// ═══════════════════════════════════════════
+// 5. DUPLICATE TRIP
+// ═══════════════════════════════════════════
+
+group('5. duplicateTrip', () => {
+
+  test('waypoints are in the same order as the source', () => {
+    const result = duplicateTrip(TRIP_LONDON_PARIS, 'Test copy');
+    assert.strictEqual(result.waypoints.length, 3);
+    assert.strictEqual(result.waypoints[0].name, 'London');
+    assert.strictEqual(result.waypoints[1].name, 'Folkestone');
+    assert.strictEqual(result.waypoints[2].name, 'Paris');
+  });
+
+  test('coordinates match source waypoints', () => {
+    const result = duplicateTrip(TRIP_LONDON_PARIS, 'Test copy');
+    assert.strictEqual(result.waypoints[0].lat, TRIP_LONDON_PARIS.waypoints[0].lat);
+    assert.strictEqual(result.waypoints[0].lng, TRIP_LONDON_PARIS.waypoints[0].lng);
+    assert.strictEqual(result.waypoints[2].lat, TRIP_LONDON_PARIS.waypoints[2].lat);
+    assert.strictEqual(result.waypoints[2].lng, TRIP_LONDON_PARIS.waypoints[2].lng);
+  });
+
+  test('name and desc are preserved from source waypoints', () => {
+    const result = duplicateTrip(TRIP_LONDON_PARIS, 'Test copy');
+    assert.strictEqual(result.waypoints[0].desc, 'Start');
+    assert.strictEqual(result.waypoints[2].desc, 'End');
+  });
+
+  test('trip name is set to the provided name', () => {
+    const result = duplicateTrip(TRIP_LONDON_PARIS, 'London to Paris (copy)');
+    assert.strictEqual(result.name, 'London to Paris (copy)');
+  });
+
+  test('each waypoint gets a fresh id (string, non-empty)', () => {
+    const result = duplicateTrip(TRIP_LONDON_PARIS, 'Test copy');
+    result.waypoints.forEach(wp => {
+      assert.strictEqual(typeof wp.id, 'string');
+      assert(wp.id.length > 0, 'id should be non-empty');
+    });
+  });
+
+  test('fresh ids differ from source waypoint ids', () => {
+    const sourceIds = new Set(TRIP_LONDON_PARIS.waypoints.map(w => w.id).filter(Boolean));
+    const result    = duplicateTrip(TRIP_LONDON_PARIS, 'Test copy');
+    result.waypoints.forEach(wp => {
+      assert(!sourceIds.has(wp.id), `id ${wp.id} should be fresh, not from the source`);
+    });
+  });
+
+  test('does not modify the original trip', () => {
+    const originalOrder = TRIP_LONDON_PARIS.waypoints.map(w => w.name);
+    duplicateTrip(TRIP_LONDON_PARIS, 'Test copy');
+    const afterOrder = TRIP_LONDON_PARIS.waypoints.map(w => w.name);
+    assert.deepStrictEqual(afterOrder, originalOrder, 'Original trip waypoints should be unchanged');
+  });
+
+  test('single-waypoint trip duplicates to itself', () => {
+    const singleWp = { name: 'Solo', waypoints: [{ lat: 10, lng: 20, name: 'A', desc: 'only' }] };
+    const result   = duplicateTrip(singleWp, 'Solo (copy)');
+    assert.strictEqual(result.waypoints.length, 1);
+    assert.strictEqual(result.waypoints[0].name, 'A');
+    assert.strictEqual(result.waypoints[0].lat,  10);
+  });
+
+  test('empty waypoints trip duplicates to empty', () => {
+    const empty  = { name: 'Empty', waypoints: [] };
+    const result = duplicateTrip(empty, 'Empty (copy)');
+    assert.strictEqual(result.waypoints.length, 0);
   });
 
 });

@@ -397,6 +397,31 @@ const ImportExport = (() => {
 })();
 
 // ═══════════════════════════════════════════
+// PATH OPERATIONS
+// ═══════════════════════════════════════════
+
+/**
+ * Create an exact copy of a trip with fresh IDs for each waypoint.
+ * Returns a new { name, waypoints } object. Does NOT modify the original trip.
+ *
+ * @param {{ name: string, waypoints: Waypoint[] }} trip
+ * @param {string} newName — name for the new trip
+ * @returns {{ name: string, waypoints: Waypoint[] }}
+ */
+function duplicateTrip(trip, newName) {
+  return {
+    name: newName,
+    waypoints: trip.waypoints.map(w => ({
+      id:   uid(),
+      lat:  w.lat,
+      lng:  w.lng,
+      name: w.name,
+      desc: w.desc,
+    })),
+  };
+}
+
+// ═══════════════════════════════════════════
 // APPLICATION STATE
 // ═══════════════════════════════════════════
 
@@ -680,6 +705,27 @@ function closeTripEdit() {
   $('#trip-edit-section').addClass('hidden');
   $('#edit-no-trip-msg').removeClass('hidden');
   populateTripSelector();
+}
+
+function duplicateTripUI() {
+  const trip = getEditTrip();
+  if (!trip) return;
+  const newName = ImportExport.uniqueTripName(trip.name + ' (copy)');
+  const copy = duplicateTrip(trip, newName);
+  const newTrip = { id: uid(), name: copy.name, waypoints: copy.waypoints };
+  trips.push(newTrip);
+  saveTrips(trips);
+  populateTripSelector();
+  openTripEdit(newTrip.id);
+}
+
+function reverseTripInPlace() {
+  const trip = getEditTrip();
+  if (!trip) return;
+  trip.waypoints.reverse();
+  saveTrips(trips);
+  renderWaypointList();
+  renderEditMap(false);
 }
 
 // ═══════════════════════════════════════════
@@ -1623,6 +1669,12 @@ $(function () {
     $('#trip-selector').val('');
   });
 
+  // ── Edit — duplicate trip ─────────────────────────────────
+  $('#btn-duplicate-trip').on('click', duplicateTripUI);
+
+  // ── Edit — reverse waypoints ──────────────────────────────
+  $('#btn-reverse-trip').on('click', reverseTripInPlace);
+
   // ── Edit — trip name ───────────────────────────────────────
   $('#trip-name-input').on('input', function () {
     const trip = getEditTrip();
@@ -1753,5 +1805,6 @@ if (typeof module !== 'undefined') {
     computeMetroLayout,
     buildMetroLineSvg,
     buildMetroVerticalSvg,
+    duplicateTrip,
   };
 }
