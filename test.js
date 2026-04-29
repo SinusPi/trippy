@@ -96,6 +96,7 @@ const {
   computeMetroLayout,
   buildMetroLineSvg,
   buildMetroVerticalSvg,
+  createReversedTrip,
 } = require('./js/app.js');
 
 // ═══════════════════════════════════════════
@@ -468,6 +469,78 @@ group('3. SVG renderings – vertical metro strip (buildMetroVerticalSvg)', () =
     assert.strictEqual(dotY.length,   2, `Expected dotY length 2, got ${dotY.length}`);
     assert.strictEqual(visIdx[0], 0, 'First visible waypoint should be original index 0');
     assert.strictEqual(visIdx[1], 2, 'Second visible waypoint should be original index 2 (end)');
+  });
+
+});
+
+// ═══════════════════════════════════════════
+// 5. REVERSE TRIP
+// ═══════════════════════════════════════════
+
+group('5. createReversedTrip', () => {
+
+  test('waypoints are in reverse order', () => {
+    const result = createReversedTrip(TRIP_LONDON_PARIS, 'Test reversed');
+    assert.strictEqual(result.waypoints.length, 3);
+    assert.strictEqual(result.waypoints[0].name, 'Paris');
+    assert.strictEqual(result.waypoints[1].name, 'Folkestone');
+    assert.strictEqual(result.waypoints[2].name, 'London');
+  });
+
+  test('coordinates match reversed source waypoints', () => {
+    const result = createReversedTrip(TRIP_LONDON_PARIS, 'Test reversed');
+    assert.strictEqual(result.waypoints[0].lat, TRIP_LONDON_PARIS.waypoints[2].lat);
+    assert.strictEqual(result.waypoints[0].lng, TRIP_LONDON_PARIS.waypoints[2].lng);
+    assert.strictEqual(result.waypoints[2].lat, TRIP_LONDON_PARIS.waypoints[0].lat);
+    assert.strictEqual(result.waypoints[2].lng, TRIP_LONDON_PARIS.waypoints[0].lng);
+  });
+
+  test('name and desc are preserved from source waypoints', () => {
+    const result = createReversedTrip(TRIP_LONDON_PARIS, 'Test reversed');
+    assert.strictEqual(result.waypoints[0].desc, 'End');
+    assert.strictEqual(result.waypoints[2].desc, 'Start');
+  });
+
+  test('trip name is set to the provided name', () => {
+    const result = createReversedTrip(TRIP_LONDON_PARIS, 'London to Paris reversed');
+    assert.strictEqual(result.name, 'London to Paris reversed');
+  });
+
+  test('each waypoint gets a fresh id (string, non-empty)', () => {
+    const result = createReversedTrip(TRIP_LONDON_PARIS, 'Test reversed');
+    result.waypoints.forEach(wp => {
+      assert.strictEqual(typeof wp.id, 'string');
+      assert(wp.id.length > 0, 'id should be non-empty');
+    });
+  });
+
+  test('fresh ids differ from source waypoint ids', () => {
+    const sourceIds = new Set(TRIP_LONDON_PARIS.waypoints.map(w => w.id).filter(Boolean));
+    const result    = createReversedTrip(TRIP_LONDON_PARIS, 'Test reversed');
+    result.waypoints.forEach(wp => {
+      assert(!sourceIds.has(wp.id), `id ${wp.id} should be fresh, not from the source`);
+    });
+  });
+
+  test('does not modify the original trip', () => {
+    const originalOrder = TRIP_LONDON_PARIS.waypoints.map(w => w.name);
+    createReversedTrip(TRIP_LONDON_PARIS, 'Test reversed');
+    const afterOrder = TRIP_LONDON_PARIS.waypoints.map(w => w.name);
+    assert.deepStrictEqual(afterOrder, originalOrder, 'Original trip waypoints should be unchanged');
+  });
+
+  test('single-waypoint trip reverses to itself', () => {
+    const singleWp = { name: 'Solo', waypoints: [{ lat: 10, lng: 20, name: 'A', desc: 'only' }] };
+    const result   = createReversedTrip(singleWp, 'Solo reversed');
+    assert.strictEqual(result.waypoints.length, 1);
+    assert.strictEqual(result.waypoints[0].name, 'A');
+    assert.strictEqual(result.waypoints[0].lat,  10);
+  });
+
+  test('empty waypoints trip reverses to empty', () => {
+    const empty  = { name: 'Empty', waypoints: [] };
+    const result = createReversedTrip(empty, 'Empty reversed');
+    assert.strictEqual(result.waypoints.length, 0);
   });
 
 });

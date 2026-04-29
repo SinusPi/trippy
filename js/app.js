@@ -397,6 +397,32 @@ const ImportExport = (() => {
 })();
 
 // ═══════════════════════════════════════════
+// PATH OPERATIONS
+// ═══════════════════════════════════════════
+
+/**
+ * Create a reversed copy of a trip.
+ * Returns a new { name, waypoints } object with waypoints in reverse order
+ * and fresh IDs assigned to each waypoint. Does NOT modify the original trip.
+ *
+ * @param {{ name: string, waypoints: Waypoint[] }} trip
+ * @param {string} newName — name for the new trip
+ * @returns {{ name: string, waypoints: Waypoint[] }}
+ */
+function createReversedTrip(trip, newName) {
+  return {
+    name: newName,
+    waypoints: trip.waypoints.slice().reverse().map(w => ({
+      id:   uid(),
+      lat:  w.lat,
+      lng:  w.lng,
+      name: w.name,
+      desc: w.desc,
+    })),
+  };
+}
+
+// ═══════════════════════════════════════════
 // APPLICATION STATE
 // ═══════════════════════════════════════════
 
@@ -680,6 +706,18 @@ function closeTripEdit() {
   $('#trip-edit-section').addClass('hidden');
   $('#edit-no-trip-msg').removeClass('hidden');
   populateTripSelector();
+}
+
+function duplicateTripReversed() {
+  const trip = getEditTrip();
+  if (!trip) return;
+  const newName = ImportExport.uniqueTripName(trip.name + ' reversed');
+  const reversed = createReversedTrip(trip, newName);
+  const newTrip = { id: uid(), name: reversed.name, waypoints: reversed.waypoints };
+  trips.push(newTrip);
+  saveTrips(trips);
+  populateTripSelector();
+  openTripEdit(newTrip.id);
 }
 
 // ═══════════════════════════════════════════
@@ -1623,6 +1661,9 @@ $(function () {
     $('#trip-selector').val('');
   });
 
+  // ── Edit — duplicate in reverse ───────────────────────────
+  $('#btn-duplicate-reversed').on('click', duplicateTripReversed);
+
   // ── Edit — trip name ───────────────────────────────────────
   $('#trip-name-input').on('input', function () {
     const trip = getEditTrip();
@@ -1753,5 +1794,6 @@ if (typeof module !== 'undefined') {
     computeMetroLayout,
     buildMetroLineSvg,
     buildMetroVerticalSvg,
+    createReversedTrip,
   };
 }
