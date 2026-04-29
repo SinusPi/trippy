@@ -93,6 +93,7 @@ const {
   decodeTripFromParam,
   decodeTripFromText,
   computeSegmentDistances,
+  computeMetroLayout,
   buildMetroLineSvg,
   buildMetroVerticalSvg,
 } = require('./js/app.js');
@@ -281,32 +282,33 @@ group('2. Path import / export', () => {
 group('3. SVG renderings – horizontal metro line (buildMetroLineSvg)', () => {
 
   const SD = computeSegmentDistances(TRIP_LONDON_PARIS.waypoints);
+  const layout = computeMetroLayout('even', TRIP_LONDON_PARIS.waypoints, SD.segDists, null);
 
   test('returns an SVG element', () => {
-    const svg = buildMetroLineSvg(TRIP_LONDON_PARIS, null, SD);
+    const svg = buildMetroLineSvg(layout, null);
     assert.strictEqual(svg.tagName, 'svg');
   });
 
   test('SVG has the correct viewBox', () => {
-    const svg = buildMetroLineSvg(TRIP_LONDON_PARIS, null, SD);
+    const svg = buildMetroLineSvg(layout, null);
     assert.strictEqual(svg.getAttribute('viewBox'), '0 0 280 106');
   });
 
   test('contains a background track line with correct stroke colour', () => {
-    const svg   = buildMetroLineSvg(TRIP_LONDON_PARIS, null, SD);
+    const svg   = buildMetroLineSvg(layout, null);
     const lines = svgEls(svg, 'line');
     assert(lines.length >= 1, 'Expected at least one <line> for the background track');
     assert.strictEqual(lines[0].getAttribute('stroke'), '#cbd5e1');
   });
 
   test('contains one dot per named endpoint/waypoint (all 3 named)', () => {
-    const svg     = buildMetroLineSvg(TRIP_LONDON_PARIS, null, SD);
+    const svg     = buildMetroLineSvg(layout, null);
     const circles = svgEls(svg, 'circle');
     assert.strictEqual(circles.length, 3, `Expected 3 waypoint circles, got ${circles.length}`);
   });
 
   test('waypoint dots are white (not passed) when no position info', () => {
-    const svg     = buildMetroLineSvg(TRIP_LONDON_PARIS, null, SD);
+    const svg     = buildMetroLineSvg(layout, null);
     const circles = svgEls(svg, 'circle');
     circles.forEach(c => {
       assert.strictEqual(c.getAttribute('fill'), '#fff', 'Unpassed dot should be white');
@@ -321,7 +323,8 @@ group('3. SVG renderings – horizontal metro line (buildMetroLineSvg)', () => {
       segT:      0,
       cumDist:   [0, 107000, 474000],
     };
-    const svg   = buildMetroLineSvg(TRIP_LONDON_PARIS, info, SD);
+    const layoutWithInfo = computeMetroLayout('even', TRIP_LONDON_PARIS.waypoints, SD.segDists, info);
+    const svg   = buildMetroLineSvg(layoutWithInfo, info);
     const lines = svgEls(svg, 'line');
     // background track + completed-portion line
     assert(lines.length >= 2, 'Expected background + progress lines');
@@ -340,7 +343,9 @@ group('3. SVG renderings – horizontal metro line (buildMetroLineSvg)', () => {
         { lat: 1,   lng: 1,   name: 'End',   desc: '' },
       ],
     };
-    const svg     = buildMetroLineSvg(trip, null, computeSegmentDistances(trip.waypoints));
+    const sd        = computeSegmentDistances(trip.waypoints);
+    const tripLayout = computeMetroLayout('even', trip.waypoints, sd.segDists, null);
+    const svg     = buildMetroLineSvg(tripLayout, null);
     const circles = svgEls(svg, 'circle');
     // Only the two named endpoints should get dots
     assert.strictEqual(circles.length, 2, `Expected 2 endpoint dots, got ${circles.length}`);
@@ -350,35 +355,39 @@ group('3. SVG renderings – horizontal metro line (buildMetroLineSvg)', () => {
 
 group('3. SVG renderings – vertical metro strip (buildMetroVerticalSvg)', () => {
 
-  const SD = computeSegmentDistances(TRIP_LONDON_PARIS.waypoints);
+  const SD     = computeSegmentDistances(TRIP_LONDON_PARIS.waypoints);
+  const layout = computeMetroLayout('even', TRIP_LONDON_PARIS.waypoints, SD.segDists, null);
 
-  test('returns an object with svg, dotY, SVG_H, posY, and cumDist', () => {
-    const result = buildMetroVerticalSvg(TRIP_LONDON_PARIS, null, SD);
-    assert(result.svg,             'Missing svg');
-    assert(Array.isArray(result.dotY),   'Missing dotY array');
-    assert(typeof result.SVG_H === 'number', 'Missing SVG_H number');
-    assert('posY' in result,       'Missing posY');
-    assert(Array.isArray(result.cumDist), 'Missing cumDist array');
+  test('returns an object with svg, dotY, SVG_H, posY, collCumDist, visIdx, and visWps', () => {
+    const result = buildMetroVerticalSvg(layout, null);
+    assert(result.svg,                         'Missing svg');
+    assert(Array.isArray(result.dotY),         'Missing dotY array');
+    assert(typeof result.SVG_H === 'number',   'Missing SVG_H number');
+    assert('posY' in result,                   'Missing posY');
+    assert(Array.isArray(result.collCumDist),  'Missing collCumDist array');
+    assert(Array.isArray(result.visIdx),       'Missing visIdx array');
+    assert(Array.isArray(result.visWps),       'Missing visWps array');
   });
 
   test('SVG element has correct width attribute', () => {
-    const { svg } = buildMetroVerticalSvg(TRIP_LONDON_PARIS, null, SD);
+    const { svg } = buildMetroVerticalSvg(layout, null);
     assert.strictEqual(svg.tagName, 'svg');
     assert.strictEqual(svg.getAttribute('width'), '36');
   });
 
-  test('dotY has one entry per waypoint', () => {
-    const { dotY } = buildMetroVerticalSvg(TRIP_LONDON_PARIS, null, SD);
-    assert.strictEqual(dotY.length, TRIP_LONDON_PARIS.waypoints.length);
+  test('dotY has one entry per visible waypoint', () => {
+    const { dotY, visWps } = buildMetroVerticalSvg(layout, null);
+    assert.strictEqual(dotY.length, visWps.length);
+    assert.strictEqual(dotY.length, TRIP_LONDON_PARIS.waypoints.length); // all 3 are named
   });
 
   test('first dot is positioned above the last dot', () => {
-    const { dotY } = buildMetroVerticalSvg(TRIP_LONDON_PARIS, null, SD);
+    const { dotY } = buildMetroVerticalSvg(layout, null);
     assert(dotY[0] < dotY[dotY.length - 1], 'First dot should be above last dot');
   });
 
   test('posY is null when no position info is provided', () => {
-    const { posY } = buildMetroVerticalSvg(TRIP_LONDON_PARIS, null, SD);
+    const { posY } = buildMetroVerticalSvg(layout, null);
     assert.strictEqual(posY, null);
   });
 
@@ -390,12 +399,13 @@ group('3. SVG renderings – vertical metro strip (buildMetroVerticalSvg)', () =
       segT:      0,
       cumDist:   [0, 107000, 474000],
     };
-    const { posY } = buildMetroVerticalSvg(TRIP_LONDON_PARIS, info, SD);
+    const layoutWithInfo = computeMetroLayout('even', TRIP_LONDON_PARIS.waypoints, SD.segDists, info);
+    const { posY } = buildMetroVerticalSvg(layoutWithInfo, info);
     assert(typeof posY === 'number' && posY > 0, `posY should be a positive number, got ${posY}`);
   });
 
   test('SVG contains one dot per waypoint (no position indicator when posY is null)', () => {
-    const { svg } = buildMetroVerticalSvg(TRIP_LONDON_PARIS, null, SD);
+    const { svg } = buildMetroVerticalSvg(layout, null);
     const circles = svgEls(svg, 'circle');
     assert.strictEqual(circles.length, 3, `Expected 3 waypoint circles, got ${circles.length}`);
   });
@@ -417,8 +427,10 @@ group('3. SVG renderings – vertical metro strip (buildMetroVerticalSvg)', () =
         { lat: 3, lng: 3, name: 'D', desc: '' },
       ],
     };
-    const { SVG_H: h2 } = buildMetroVerticalSvg(tripShort, null, computeSegmentDistances(tripShort.waypoints));
-    const { SVG_H: h4 } = buildMetroVerticalSvg(tripLong,  null, computeSegmentDistances(tripLong.waypoints));
+    const sdShort   = computeSegmentDistances(tripShort.waypoints);
+    const sdLong    = computeSegmentDistances(tripLong.waypoints);
+    const { SVG_H: h2 } = buildMetroVerticalSvg(computeMetroLayout('even', tripShort.waypoints, sdShort.segDists, null), null);
+    const { SVG_H: h4 } = buildMetroVerticalSvg(computeMetroLayout('even', tripLong.waypoints,  sdLong.segDists,  null), null);
     assert(h4 > h2, `More waypoints should give a taller SVG (${h4} > ${h2})`);
   });
 
@@ -430,10 +442,32 @@ group('3. SVG renderings – vertical metro strip (buildMetroVerticalSvg)', () =
       segT:      0,
       cumDist:   [0, 107000, 474000],
     };
-    const { svg } = buildMetroVerticalSvg(TRIP_LONDON_PARIS, info, SD);
+    const layoutWithInfo = computeMetroLayout('even', TRIP_LONDON_PARIS.waypoints, SD.segDists, info);
+    const { svg } = buildMetroVerticalSvg(layoutWithInfo, info);
     const circles = svgEls(svg, 'circle');
     // 3 waypoint dots + 2 position-indicator circles (ring + filled dot)
     assert(circles.length >= 5, `Expected ≥5 circles with position info, got ${circles.length}`);
+  });
+
+  test('unnamed intermediate waypoints are collapsed: dotY and visWps lengths match (label alignment bug)', () => {
+    // A trip where the middle waypoint is unnamed — it must be invisible.
+    // dotY and visWps must both have length 2 (start + end only), so that
+    // dotY[vi] aligns correctly with visWps[vi] in renderMetroVertical.
+    const trip = {
+      name: 'Collapse test',
+      waypoints: [
+        { lat: 0, lng: 0,  name: 'Start', desc: '' },
+        { lat: 1, lng: 1,  name: '',      desc: '' },  // unnamed – must be collapsed
+        { lat: 2, lng: 2,  name: 'End',   desc: '' },
+      ],
+    };
+    const sd         = computeSegmentDistances(trip.waypoints);
+    const tripLayout = computeMetroLayout('even', trip.waypoints, sd.segDists, null);
+    const { dotY, visWps, visIdx } = buildMetroVerticalSvg(tripLayout, null);
+    assert.strictEqual(visWps.length, 2, `Expected 2 visible waypoints, got ${visWps.length}`);
+    assert.strictEqual(dotY.length,   2, `Expected dotY length 2, got ${dotY.length}`);
+    assert.strictEqual(visIdx[0], 0, 'First visible waypoint should be original index 0');
+    assert.strictEqual(visIdx[1], 2, 'Second visible waypoint should be original index 2 (end)');
   });
 
 });
