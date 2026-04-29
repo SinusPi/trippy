@@ -1105,13 +1105,7 @@ function computeMetroLayout(mode, wps, segDists, info = null) {
   return { visIdx, visWps, numVisible, collSegDists, collCumDist, fractions, progressFrac };
 }
 
-function buildMetroLineSvg(trip, positionInfo, segData) {
-  const wps = trip.waypoints;
-
-  const { segDists } = segData;
-
-  const layout = computeMetroLayout(metroMode, wps, segDists, positionInfo);
-  if (!layout) { $container.empty(); return; }
+function buildMetroLineSvg(layout, positionInfo) {
   const { visIdx, visWps, numVisible: nv, collSegDists, collCumDist, fractions, progressFrac } = layout;
 
   // ── Layout constants ───────────────────────────────────────
@@ -1126,7 +1120,7 @@ function buildMetroLineSvg(trip, positionInfo, segData) {
 
   // Has a visible waypoint been passed?
   function isPassed(vi) {
-    return info !== null && collCumDist[vi] <= info.distAlong + WAYPOINT_PROXIMITY_THRESHOLD;
+    return positionInfo !== null && collCumDist[vi] <= positionInfo.distAlong + WAYPOINT_PROXIMITY_THRESHOLD;
   }
 
   // ── Build SVG ─────────────────────────────────────────────
@@ -1251,7 +1245,10 @@ function renderMetroLine(trip, info, segData) {
     return;
   }
 
-  $container.empty().append(buildMetroLineSvg(trip, info, segData));
+  const layout = computeMetroLayout(metroMode, trip.waypoints, segData.segDists, info);
+  if (!layout) { $container.empty(); return; }
+
+  $container.empty().append(buildMetroLineSvg(layout, info));
 }
 
 // ═══════════════════════════════════════════
@@ -1271,22 +1268,16 @@ function refreshMetroLine() {
 
 /**
  * Build and return the vertical metro SVG element (track, waypoint dots,
- * position marker) for the given trip and (optional) position info.
+ * position marker) for the given pre-computed layout and (optional) position info.
  * Pure DOM function – no jQuery dependency.
  *
- * @param {Trip}          trip
- * @param {PathPositionInfo|null} positionInfo     — null if no GPS fix yet
- * @param {SegData}       segData
- * @returns {{ svg: SVGElement, dotY: number[], SVG_H: number, posY: number|null, cumDist: number[] }}
+ * @param {object}                layout       — result of computeMetroLayout
+ * @param {PathPositionInfo|null} positionInfo — null if no GPS fix yet
+ * @returns {{ svg: SVGElement, dotY: number[], SVG_H: number, posY: number|null,
+ *             collCumDist: number[], visIdx: number[], visWps: Waypoint[] }}
  */
-function buildMetroVerticalSvg(trip, positionInfo, segData) {
-  const wps = trip.waypoints;
-
-  const { segDists, cumDist } = segData;
-
-  const layout = computeMetroLayout(metroMode, wps, segDists, positionInfo);
-  if (!layout) { $section.addClass('hidden'); return; }
-  const { visIdx, visWps, numVisible: nv, collSegDists, collCumDist, fractions, progressFrac } = layout;
+function buildMetroVerticalSvg(layout, positionInfo) {
+  const { visIdx, visWps, numVisible: nv, collCumDist, fractions, progressFrac } = layout;
 
 
   // ── Layout constants ───────────────────────────────────────
@@ -1366,7 +1357,7 @@ function buildMetroVerticalSvg(trip, positionInfo, segData) {
     }));
   }
 
-  return { svg, dotY, SVG_H, posY, cumDist, collCumDist, visIdx, visWps };
+  return { svg, dotY, SVG_H, posY, collCumDist, visIdx, visWps };
 }
 
 /**
@@ -1395,7 +1386,10 @@ function renderMetroVertical(trip, info, segData) {
     return;
   }
 
-  const { svg, dotY, SVG_H, posY, cumDist, collCumDist, visIdx, visWps } = buildMetroVerticalSvg(trip, info, segData);
+  const layout = computeMetroLayout(metroMode, trip.waypoints, segData.segDists, info);
+  if (!layout) { $section.addClass('hidden'); return; }
+
+  const { svg, dotY, SVG_H, posY, collCumDist, visIdx, visWps } = buildMetroVerticalSvg(layout, info);
 
   // ── Assemble: SVG + absolutely-positioned info divs ───────
   $inner.empty().css('height', SVG_H + 'px');
@@ -1756,6 +1750,7 @@ if (typeof module !== 'undefined') {
     decodeTripFromParam: ImportExport.decodeTripFromParam,
     decodeTripFromText: ImportExport.decodeTripFromText,
     computeSegmentDistances,
+    computeMetroLayout,
     buildMetroLineSvg,
     buildMetroVerticalSvg,
   };
