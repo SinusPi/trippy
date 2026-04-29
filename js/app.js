@@ -405,7 +405,8 @@ let mode        = 'edit';  // 'edit' | 'drive'
 let editTripId  = null;    // ID of trip currently open in edit mode
 /** @type {DriveState|null} */
 let driveState  = null;
-let metroProp   = true;    // true = proportional spacing, false = even spacing
+/** @type {'proportional'|'even'} */
+let metroMode = 'proportional';
 let metroVScrollPaused = false; // true while the user holds down on the vertical metro scroll box
 
 // ── Layout / geometry constants ────────────────────────────
@@ -1048,7 +1049,7 @@ function buildMetroLineSvg(trip, info, segData) {
   const collCumDist = collCumDistNorm.map(f => f * collTotalDist);
 
   // Fraction for each visible waypoint along the visual track
-  const fractions = metroProp
+  const fractions = metroMode === 'proportional'
     ? collCumDistNorm                            // proportional to real distance
     : visWps.map((_, vi) => vi / (nv - 1));     // evenly spaced
 
@@ -1068,7 +1069,7 @@ function buildMetroLineSvg(trip, info, segData) {
   // indicator moves smoothly between visible waypoints regardless of how many
   // unnamed stops were collapsed together.
   const progressFrac = info
-    ? (metroProp
+    ? (metroMode === 'proportional'
         ? (info.totalDist > 0 ? info.distAlong / info.totalDist : 0)
         : (() => {
             let vi = 0;
@@ -1116,7 +1117,7 @@ function buildMetroLineSvg(trip, info, segData) {
 
   // ── Inter-segment distance labels (proportional mode only) ──
   // Shows the combined distance of each collapsed segment.
-  if (metroProp) {
+  if (metroMode === 'proportional') {
     for (let vi = 0; vi < nv - 1; vi++) {
       const x1 = PAD_H + TRACK_W * fractions[vi];
       const x2 = PAD_H + TRACK_W * fractions[vi + 1];
@@ -1284,7 +1285,7 @@ function buildMetroVerticalSvg(trip, info, segData) {
   const SVG_H   = PAD_V + TRACK_H + PAD_V;
 
   // Fraction (0–1) for each visible waypoint along the visual track
-  const fractions = metroProp
+  const fractions = metroMode === 'proportional'
     ? collCumDistNorm
     : visWps.map((_, vi) => vi / (nv - 1));
 
@@ -1294,7 +1295,7 @@ function buildMetroVerticalSvg(trip, info, segData) {
   // In proportional mode: raw distance ratio.
   // In even mode: map distAlong into collapsed-segment visual space.
   const progressFrac = info
-    ? (metroProp
+    ? (metroMode === 'proportional'
         ? (info.totalDist > 0 ? info.distAlong / info.totalDist : 0)
         : (() => {
             let vi = 0;
@@ -1381,7 +1382,7 @@ function buildMetroVerticalSvg(trip, info, segData) {
  * corresponding dot in the SVG.
  *
  * Spacing follows the same proportional / even logic as the horizontal metro
- * (controlled by the shared metroProp flag):
+ * (controlled by the shared metroMode flag):
  *   – proportional: dot y-positions mirror real inter-waypoint distances
  *   – even: dots are equally spaced regardless of distance
  *
@@ -1713,16 +1714,16 @@ $(function () {
 
   // ── Metro spacing toggle ──────────────────────────────────
   $('#btn-metro-proportional').on('click', function () {
-    if (metroProp) return;
-    metroProp = true;
+    if (metroMode === 'proportional') return;
+    metroMode = 'proportional';
     $(this).addClass('active');
     $('#btn-metro-even').removeClass('active');
     refreshMetroLine();
   });
 
   $('#btn-metro-even').on('click', function () {
-    if (!metroProp) return;
-    metroProp = false;
+    if (metroMode === 'even') return;
+    metroMode = 'even';
     $(this).addClass('active');
     $('#btn-metro-proportional').removeClass('active');
     refreshMetroLine();
