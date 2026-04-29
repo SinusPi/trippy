@@ -711,7 +711,7 @@ function closeTripEdit() {
 function duplicateTripReversed() {
   const trip = getEditTrip();
   if (!trip) return;
-  const newName = ImportExport.uniqueTripName(trip.name + ' reversed');
+  const newName = ImportExport.uniqueTripName(trip.name + ' (reversed)');
   const reversed = createReversedTrip(trip, newName);
   const newTrip = { id: uid(), name: reversed.name, waypoints: reversed.waypoints };
   trips.push(newTrip);

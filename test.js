@@ -502,8 +502,8 @@ group('5. createReversedTrip', () => {
   });
 
   test('trip name is set to the provided name', () => {
-    const result = createReversedTrip(TRIP_LONDON_PARIS, 'London to Paris reversed');
-    assert.strictEqual(result.name, 'London to Paris reversed');
+    const result = createReversedTrip(TRIP_LONDON_PARIS, 'London to Paris (reversed)');
+    assert.strictEqual(result.name, 'London to Paris (reversed)');
   });
 
   test('each waypoint gets a fresh id (string, non-empty)', () => {
