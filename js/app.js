@@ -405,7 +405,7 @@ let mode        = 'edit';  // 'edit' | 'drive'
 let editTripId  = null;    // ID of trip currently open in edit mode
 /** @type {DriveState|null} */
 let driveState  = null;
-/** @type {'proportional'|'even'} */
+/** @type {'proportional'|'even'|'smart'} */
 let metroMode = 'proportional';
 let metroVScrollPaused = false; // true while the user holds down on the vertical metro scroll box
 
@@ -1010,6 +1010,51 @@ function onTestPositionClick(latlng) {
  * @param {SegData}       segData
  * @returns {SVGElement}
  */
+
+/**
+ * Compute cumulative visual fractions [0…1] for the given metro spacing mode.
+ *
+ * 'proportional' — fractions mirror real inter-waypoint distances (returns collCumDistNorm as-is).
+ * 'even'         — waypoints equally spaced regardless of distance.
+ * 'smart'        — power-scaled so the longest visual segment is at most 2× the shortest.
+ *                  Falls back to proportional when the ratio is already ≤ 2.
+ *
+ * @param {'proportional'|'even'|'smart'} mode
+ * @param {number[]} segDists       — collapsed segment distances (metres), length nv-1
+ * @param {number[]} collCumDistNorm — pre-computed proportional fractions, length nv
+ * @returns {number[]}               — length nv, starts at 0, ends at 1
+ */
+function metroFractions(mode, segDists, collCumDistNorm) {
+  const nv = collCumDistNorm.length;
+  if (mode === 'proportional') {
+    return collCumDistNorm;
+  }
+  if (mode === 'even') {
+    return collCumDistNorm.map((_, vi) => vi / (nv - 1));
+  }
+  // 'smart': power-scale so max/min visual ratio ≤ 2
+  const nonZero = segDists.filter(d => d > 0);
+  if (nonZero.length === 0) {
+    return collCumDistNorm.map((_, vi) => vi / (nv - 1));
+  }
+  const dMin  = Math.min(...nonZero);
+  const dMax  = Math.max(...segDists);
+  const ratio = dMax / dMin;
+  let scaled;
+  if (ratio <= 2) {
+    scaled = segDists.slice();
+  } else {
+    const alpha = Math.log(2) / Math.log(ratio);
+    scaled = segDists.map(d => d > 0 ? Math.pow(d, alpha) : 0);
+  }
+  const total = scaled.reduce((s, d) => s + d, 0);
+  const fracs = [0];
+  for (let i = 0; i < scaled.length; i++) {
+    fracs.push(fracs[i] + scaled[i] / total);
+  }
+  return fracs;
+}
+
 function buildMetroLineSvg(trip, info, segData) {
   const wps = trip.waypoints;
   const n   = wps.length;
@@ -1049,9 +1094,7 @@ function buildMetroLineSvg(trip, info, segData) {
   const collCumDist = collCumDistNorm.map(f => f * collTotalDist);
 
   // Fraction for each visible waypoint along the visual track
-  const fractions = metroMode === 'proportional'
-    ? collCumDistNorm                            // proportional to real distance
-    : visWps.map((_, vi) => vi / (nv - 1));     // evenly spaced
+  const fractions = metroFractions(metroMode, collSegDists, collCumDistNorm);
 
   // ── Layout constants ───────────────────────────────────────
   // Two rows of labels, above and below the track
@@ -1076,7 +1119,7 @@ function buildMetroLineSvg(trip, info, segData) {
             while (vi < nv - 2 && collCumDist[vi + 1] <= info.distAlong) vi++;
             const segLen = collCumDist[vi + 1] - collCumDist[vi];
             const t      = segLen > 0 ? Math.min(1, (info.distAlong - collCumDist[vi]) / segLen) : 0;
-            return (vi + t) / (nv - 1);
+            return fractions[vi] + (fractions[vi + 1] - fractions[vi]) * t;
           })())
     : null;
 
@@ -1285,15 +1328,13 @@ function buildMetroVerticalSvg(trip, info, segData) {
   const SVG_H   = PAD_V + TRACK_H + PAD_V;
 
   // Fraction (0–1) for each visible waypoint along the visual track
-  const fractions = metroMode === 'proportional'
-    ? collCumDistNorm
-    : visWps.map((_, vi) => vi / (nv - 1));
+  const fractions = metroFractions(metroMode, collSegDists, collCumDistNorm);
 
   const dotY = fractions.map(f => PAD_V + f * TRACK_H);
 
   // Progress fraction along the visual track.
   // In proportional mode: raw distance ratio.
-  // In even mode: map distAlong into collapsed-segment visual space.
+  // In even/smart mode: map distAlong into collapsed-segment visual space.
   const progressFrac = info
     ? (metroMode === 'proportional'
         ? (info.totalDist > 0 ? info.distAlong / info.totalDist : 0)
@@ -1302,7 +1343,7 @@ function buildMetroVerticalSvg(trip, info, segData) {
             while (vi < nv - 2 && collCumDist[vi + 1] <= info.distAlong) vi++;
             const segLen = collCumDist[vi + 1] - collCumDist[vi];
             const t      = segLen > 0 ? Math.min(1, (info.distAlong - collCumDist[vi]) / segLen) : 0;
-            return (vi + t) / (nv - 1);
+            return fractions[vi] + (fractions[vi + 1] - fractions[vi]) * t;
           })())
     : null;
 
@@ -1717,7 +1758,7 @@ $(function () {
     if (metroMode === 'proportional') return;
     metroMode = 'proportional';
     $(this).addClass('active');
-    $('#btn-metro-even').removeClass('active');
+    $('#btn-metro-even, #btn-metro-smart').removeClass('active');
     refreshMetroLine();
   });
 
@@ -1725,7 +1766,15 @@ $(function () {
     if (metroMode === 'even') return;
     metroMode = 'even';
     $(this).addClass('active');
-    $('#btn-metro-proportional').removeClass('active');
+    $('#btn-metro-proportional, #btn-metro-smart').removeClass('active');
+    refreshMetroLine();
+  });
+
+  $('#btn-metro-smart').on('click', function () {
+    if (metroMode === 'smart') return;
+    metroMode = 'smart';
+    $(this).addClass('active');
+    $('#btn-metro-proportional, #btn-metro-even').removeClass('active');
     refreshMetroLine();
   });
 
