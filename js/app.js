@@ -1012,89 +1012,93 @@ function onTestPositionClick(latlng) {
  */
 
 /**
- * Compute cumulative visual fractions [0…1] for the given metro spacing mode.
+ * Collapse unnamed intermediate waypoints and compute all visual layout data
+ * needed by the metro builders for the given spacing mode.
  *
- * 'proportional' — fractions mirror real inter-waypoint distances (returns collCumDistNorm as-is).
- * 'even'         — waypoints equally spaced regardless of distance.
- * 'smart'        — power-scaled so the longest visual segment is at most 2× the shortest.
- *                  Falls back to proportional when the ratio is already ≤ 2.
+ * Only named waypoints and the two endpoints are "visible"; segments between
+ * adjacent visible waypoints are merged so unnamed stops are truly invisible.
+ *
+ * Returns null when fewer than 2 visible waypoints are found (degenerate trip).
  *
  * @param {'proportional'|'even'|'smart'} mode
- * @param {number[]} segDists       — collapsed segment distances (metres), length nv-1
- * @param {number[]} collCumDistNorm — pre-computed proportional fractions, length nv
- * @returns {number[]}               — length nv, starts at 0, ends at 1
+ * @param {Waypoint[]} wps
+ * @param {number[]}   segDists — per-segment distances from SegData
+ * @returns {{ visIdx: number[], visWps: Waypoint[], numVisible: number,
+ *             collSegDists: number[], collCumDist: number[],
+ *             fractions: number[] } | null}
  */
-function metroFractions(mode, segDists, collCumDistNorm) {
-  const nv = collCumDistNorm.length;
-  if (mode === 'proportional') {
-    return collCumDistNorm;
-  }
-  if (mode === 'even') {
-    return collCumDistNorm.map((_, vi) => vi / (nv - 1));
-  }
-  // 'smart': power-scale so max/min visual ratio ≤ 2
-  const nonZero = segDists.filter(d => d > 0);
-  if (nonZero.length === 0) {
-    return collCumDistNorm.map((_, vi) => vi / (nv - 1));
-  }
-  const dMin  = Math.min(...nonZero);
-  const dMax  = Math.max(...segDists);
-  const ratio = dMax / dMin;
-  let scaled;
-  if (ratio <= 2) {
-    scaled = segDists.slice();
-  } else {
-    const alpha = Math.log(2) / Math.log(ratio);
-    scaled = segDists.map(d => d > 0 ? Math.pow(d, alpha) : 0);
-  }
-  const total = scaled.reduce((s, d) => s + d, 0);
-  const fracs = [0];
-  for (let i = 0; i < scaled.length; i++) {
-    fracs.push(fracs[i] + scaled[i] / total);
-  }
-  return fracs;
-}
-
-function buildMetroLineSvg(trip, info, segData) {
-  const wps = trip.waypoints;
-  const n   = wps.length;
-
-  const { segDists, totalDist } = segData;
-
-  // ── Collapse unnamed intermediate waypoints ────────────────
-  // Only named waypoints + the two endpoints are shown on the metro line.
-  // Segments between adjacent visible waypoints are merged into one, with
-  // their distances summed, so unnamed stops are truly invisible.
+function computeMetroLayout(mode, wps, segDists) {
+  const n      = wps.length;
   const visIdx = wps.reduce((acc, wp, i) => {
     if (wp.name || i === 0 || i === n - 1) acc.push(i);
     return acc;
   }, []);
   const visWps = visIdx.map(i => wps[i]);
-  const nv     = visWps.length;
-
-  // nv >= 2 is guaranteed by the length check above, but guard defensively.
-  if (nv < 2) { $container.empty(); return; }
+  const numVisible     = visWps.length;
+  if (numVisible < 2) return null;
 
   // Collapsed segment distances: sum original segments between adjacent visible wps
   const collSegDists = [];
-  for (let vi = 0; vi < nv - 1; vi++) {
+  for (let vi = 0; vi < numVisible - 1; vi++) {
     let dist = 0;
     for (let oi = visIdx[vi]; oi < visIdx[vi + 1]; oi++) dist += segDists[oi];
     collSegDists.push(dist);
   }
   const collTotalDist = collSegDists.reduce((s, d) => s + d, 0);
 
-  // Cumulative normalised distances for visible waypoints [0 … 1]
+  // Cumulative normalised distances [0 … 1] — proportional baseline
   const collCumDistNorm = [0];
-  for (let vi = 0; vi < nv - 1; vi++) {
-    collCumDistNorm.push(collCumDistNorm[vi] + (collTotalDist > 0 ? collSegDists[vi] / collTotalDist : 1 / (nv - 1)));
+  for (let vi = 0; vi < numVisible - 1; vi++) {
+    collCumDistNorm.push(collCumDistNorm[vi] + (collTotalDist > 0 ? collSegDists[vi] / collTotalDist : 1 / (numVisible - 1)));
   }
 
   // Cumulative distances (metres) to each visible waypoint
   const collCumDist = collCumDistNorm.map(f => f * collTotalDist);
 
-  // Fraction for each visible waypoint along the visual track
-  const fractions = metroFractions(metroMode, collSegDists, collCumDistNorm);
+  // Visual fractions for the selected spacing mode
+  let fractions;
+  if (mode === 'proportional') {
+    fractions = collCumDistNorm;
+  } else if (mode === 'even') {
+    fractions = collCumDistNorm.map((_, vi) => vi / (numVisible - 1));
+  } else if (mode === 'smart') {
+    // 'smart': power-scale so max/min visual ratio ≤ 2
+    const nonZero = collSegDists.filter(d => d > 0);
+    if (nonZero.length === 0) {
+      fractions = collCumDistNorm.map((_, vi) => vi / (numVisible - 1));
+    } else {
+      const dMin  = Math.min(...nonZero);
+      const dMax  = Math.max(...collSegDists);
+      const ratio = dMax / dMin;
+      let scaled;
+      if (ratio <= 2) {
+        scaled = collSegDists.slice();
+      } else {
+        const alpha = Math.log(2) / Math.log(ratio);
+        scaled = collSegDists.map(d => d > 0 ? Math.pow(d, alpha) : 0);
+      }
+      const total = scaled.reduce((s, d) => s + d, 0);
+      const fracs = [0];
+      for (let i = 0; i < scaled.length; i++) {
+        fracs.push(fracs[i] + scaled[i] / total);
+      }
+      fractions = fracs;
+    }
+  } else {
+    throw new Error(`Invalid metro mode: ${mode}`);
+  }
+
+  return { visIdx, visWps, numVisible, collSegDists, collCumDist, fractions };
+}
+
+function buildMetroLineSvg(trip, info, segData) {
+  const wps = trip.waypoints;
+
+  const { segDists } = segData;
+
+  const layout = computeMetroLayout(metroMode, wps, segDists);
+  if (!layout) { $container.empty(); return; }
+  const { visIdx, visWps, numVisible: nv, collSegDists, collCumDist, fractions } = layout;
 
   // ── Layout constants ───────────────────────────────────────
   // Two rows of labels, above and below the track
@@ -1280,41 +1284,13 @@ function refreshMetroLine() {
  */
 function buildMetroVerticalSvg(trip, info, segData) {
   const wps = trip.waypoints;
-  const n   = wps.length;
 
-  const { segDists, cumDist, totalDist } = segData;
+  const { segDists, cumDist } = segData;
 
-  // ── Collapse unnamed intermediate waypoints ────────────────
-  // Only named waypoints + the two endpoints are shown on the vertical metro.
-  // Segments between adjacent visible waypoints are merged into one, with
-  // their distances summed, so unnamed stops are truly invisible.
-  const visIdx = wps.reduce((acc, wp, i) => {
-    if (wp.name || i === 0 || i === n - 1) acc.push(i);
-    return acc;
-  }, []);
-  const visWps = visIdx.map(i => wps[i]);
-  const nv     = visWps.length;
+  const layout = computeMetroLayout(metroMode, wps, segDists);
+  if (!layout) { $section.addClass('hidden'); return; }
+  const { visIdx, visWps, numVisible: nv, collSegDists, collCumDist, fractions } = layout;
 
-  // nv >= 2 is guaranteed by the length check above, but guard defensively.
-  if (nv < 2) { $section.addClass('hidden'); return; }
-
-  // Collapsed segment distances: sum original segments between adjacent visible wps
-  const collSegDists = [];
-  for (let vi = 0; vi < nv - 1; vi++) {
-    let dist = 0;
-    for (let oi = visIdx[vi]; oi < visIdx[vi + 1]; oi++) dist += segDists[oi];
-    collSegDists.push(dist);
-  }
-  const collTotalDist = collSegDists.reduce((s, d) => s + d, 0);
-
-  // Cumulative normalised distances for visible waypoints [0 … 1]
-  const collCumDistNorm = [0];
-  for (let vi = 0; vi < nv - 1; vi++) {
-    collCumDistNorm.push(collCumDistNorm[vi] + (collTotalDist > 0 ? collSegDists[vi] / collTotalDist : 1 / (nv - 1)));
-  }
-
-  // Cumulative distances (metres) to each visible waypoint
-  const collCumDist = collCumDistNorm.map(f => f * collTotalDist);
 
   // ── Layout constants ───────────────────────────────────────
   // SVG_W must match the CSS .mv-info-div { left: 36px } value.
@@ -1328,7 +1304,7 @@ function buildMetroVerticalSvg(trip, info, segData) {
   const SVG_H   = PAD_V + TRACK_H + PAD_V;
 
   // Fraction (0–1) for each visible waypoint along the visual track
-  const fractions = metroFractions(metroMode, collSegDists, collCumDistNorm);
+  // (already computed by computeMetroLayout; destructured above)
 
   const dotY = fractions.map(f => PAD_V + f * TRACK_H);
 
