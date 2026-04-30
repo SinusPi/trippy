@@ -49,12 +49,19 @@ global.turf = require('@turf/turf');
 global.localStorage = { getItem: () => null, setItem: () => {} };
 
 // Minimal Leaflet stub – only what top-level app.js code uses at load time
-const _mapObj = { on: () => {} };
+const _noopLayer = { on: () => _noopLayer, addTo: () => _noopLayer, bindTooltip: () => _noopLayer, remove: () => _noopLayer };
+const _mapObj = { on: () => {}, removeLayer: () => {}, fitBounds: () => {} };
 _mapObj.setView = () => _mapObj;
 global.L = {
-  map:       () => _mapObj,
-  tileLayer: () => ({ addTo: () => {} }),
-  latLng:    (lat, lng) => ({ lat, lng }),
+  map:          () => _mapObj,
+  tileLayer:    () => ({ addTo: () => {} }),
+  latLng:       (lat, lng) => ({ lat, lng }),
+  polyline:     () => _noopLayer,
+  marker:       () => _noopLayer,
+  latLngBounds: () => ({ pad: () => ({}) }),
+  divIcon:      () => ({}),
+  Icon:         { Default: function () {} },
+  DomEvent:     { stopPropagation: () => {} },
 };
 
 // Minimal jQuery stub – document-ready callbacks are ignored; all DOM
@@ -67,7 +74,7 @@ global.$ = function (arg) {
     'empty', 'append', 'text', 'val', 'addClass', 'removeClass',
     'toggleClass', 'show', 'hide', 'on', 'off', 'css', 'attr',
     'find', 'is', 'closest', 'remove', 'trigger', 'html',
-    'prepend', 'before', 'after',
+    'prepend', 'before', 'after', 'appendTo',
   ].forEach(m => { chain[m] = () => chain; });
   chain.length = 0;
   return chain;
@@ -97,7 +104,12 @@ const {
   buildMetroLineSvg,
   buildMetroVerticalSvg,
   duplicateTrip,
+  snapshotEditTrip,
+  undoEdit,
+  getEditTrip,
 } = require('./js/app.js');
+
+const app = require('./js/app.js');
 
 // ═══════════════════════════════════════════
 // FIXTURE DATA
@@ -546,8 +558,83 @@ group('5. duplicateTrip', () => {
 });
 
 // ═══════════════════════════════════════════
-// SUMMARY
+// 9. UNDO HISTORY
 // ═══════════════════════════════════════════
+
+group('9. Undo history', () => {
+
+  /** Helper: set up a fresh trip as the active edit trip. */
+  function setupEditTrip(waypoints) {
+    const trip = {
+      id: 'test-trip-undo',
+      name: 'Undo Test',
+      waypoints: waypoints.map((w, i) => ({ id: `wp${i}`, ...w })),
+    };
+    app.trips = [trip];
+    app.editTripId = trip.id;
+    app.editUndoHistory = [];
+    return trip;
+  }
+
+  test('snapshotEditTrip pushes a deep copy of waypoints', () => {
+    const trip = setupEditTrip([{ lat: 1, lng: 2, name: 'A', desc: '' }]);
+    snapshotEditTrip();
+    assert.strictEqual(app.editUndoHistory.length, 1);
+    // Mutating the trip should not affect the snapshot
+    trip.waypoints[0].lat = 99;
+    assert.strictEqual(app.editUndoHistory[0].waypoints[0].lat, 1);
+  });
+
+  test('undoEdit restores previous waypoints', () => {
+    const trip = setupEditTrip([
+      { lat: 1, lng: 2, name: 'A', desc: '' },
+      { lat: 3, lng: 4, name: 'B', desc: '' },
+    ]);
+    snapshotEditTrip();          // snapshot before change
+    trip.waypoints.push({ id: 'wp2', lat: 5, lng: 6, name: 'C', desc: '' });
+    assert.strictEqual(trip.waypoints.length, 3);
+    undoEdit();
+    assert.strictEqual(trip.waypoints.length, 2, 'undo should restore two waypoints');
+    assert.strictEqual(trip.waypoints[1].name, 'B');
+  });
+
+  test('undoEdit does nothing when history is empty', () => {
+    const trip = setupEditTrip([{ lat: 1, lng: 2, name: 'A', desc: '' }]);
+    assert.doesNotThrow(() => undoEdit());
+    assert.strictEqual(trip.waypoints.length, 1, 'waypoints unchanged with empty history');
+  });
+
+  test('multiple snapshots accumulate and undo in LIFO order', () => {
+    const trip = setupEditTrip([{ lat: 0, lng: 0, name: 'Origin', desc: '' }]);
+    snapshotEditTrip();
+    trip.waypoints.push({ id: 'wp1', lat: 1, lng: 1, name: 'P1', desc: '' });
+    snapshotEditTrip();
+    trip.waypoints.push({ id: 'wp2', lat: 2, lng: 2, name: 'P2', desc: '' });
+    assert.strictEqual(trip.waypoints.length, 3);
+    undoEdit(); // undo second push
+    assert.strictEqual(trip.waypoints.length, 2);
+    undoEdit(); // undo first push
+    assert.strictEqual(trip.waypoints.length, 1);
+    assert.strictEqual(trip.waypoints[0].name, 'Origin');
+  });
+
+  test(`history is capped at EDIT_UNDO_LIMIT (${app.EDIT_UNDO_LIMIT})`, () => {
+    const trip = setupEditTrip([{ lat: 0, lng: 0, name: 'X', desc: '' }]);
+    for (let i = 0; i < app.EDIT_UNDO_LIMIT + 5; i++) {
+      snapshotEditTrip();
+    }
+    assert.strictEqual(app.editUndoHistory.length, app.EDIT_UNDO_LIMIT);
+  });
+
+  test('undoEdit pops (consumes) the snapshot so repeated undo works correctly', () => {
+    const trip = setupEditTrip([{ lat: 1, lng: 1, name: 'A', desc: '' }]);
+    snapshotEditTrip();
+    trip.waypoints[0].name = 'A-modified';
+    undoEdit();
+    assert.strictEqual(app.editUndoHistory.length, 0, 'snapshot should be consumed');
+  });
+
+});
 
 console.log(`\n${'─'.repeat(44)}`);
 console.log(`Results: ${passed} passed, ${failed} failed`);

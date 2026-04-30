@@ -428,6 +428,9 @@ function duplicateTrip(trip, newName) {
 let trips       = loadTrips();
 let mode        = 'edit';  // 'edit' | 'drive'
 let editTripId  = null;    // ID of trip currently open in edit mode
+/** Undo history for the current trip being edited (up to EDIT_UNDO_LIMIT snapshots). */
+let editUndoHistory = [];
+const EDIT_UNDO_LIMIT = 10;
 /** @type {DriveState|null} */
 let driveState  = null;
 /** @type {'proportional'|'even'|'smart'} */
@@ -588,6 +591,28 @@ function getEditTrip() {
   return trips.find(t => t.id === editTripId) || null;
 }
 
+/** Push a snapshot of the current trip's waypoints onto the undo stack. */
+function snapshotEditTrip() {
+  const trip = getEditTrip();
+  if (!trip) return;
+  editUndoHistory.push({
+    waypoints: trip.waypoints.map(w => ({ ...w })),
+  });
+  if (editUndoHistory.length > EDIT_UNDO_LIMIT) editUndoHistory.shift();
+}
+
+/** Restore the most recent undo snapshot for the current trip. */
+function undoEdit() {
+  if (!editUndoHistory.length) return;
+  const trip = getEditTrip();
+  if (!trip) return;
+  const snapshot = editUndoHistory.pop();
+  trip.waypoints = snapshot.waypoints;
+  saveTrips(trips);
+  renderWaypointList();
+  renderEditMap(false);
+}
+
 function clearEditLayers() {
   editMarkers.forEach(m => map.removeLayer(m));
   editMarkers = [];
@@ -613,6 +638,7 @@ function renderEditMap(rezoom=true) {
       const positionInfo = getPathPositionInfo(e.latlng, trip.waypoints);
       if (!positionInfo) return;
       const wp = { id: uid(), lat: positionInfo.nearestLatLng.lat, lng: positionInfo.nearestLatLng.lng, name: '', desc: '' };
+      snapshotEditTrip();
       trip.waypoints.splice(positionInfo.segIdx + 1, 0, wp);
       saveTrips(trips);
       renderWaypointList();
@@ -637,6 +663,7 @@ function renderEditMap(rezoom=true) {
 
     marker.on('dragend', () => {
       const ll = marker.getLatLng();
+      snapshotEditTrip();
       wp.lat = ll.lat;
       wp.lng = ll.lng;
       saveTrips(trips);
@@ -684,6 +711,7 @@ function renderWaypointList() {
 
 function openTripEdit(id) {
   editTripId = id;
+  editUndoHistory = [];
   const trip = getEditTrip();
   if (!trip) {
     closeTripEdit();
@@ -722,6 +750,7 @@ function duplicateTripUI() {
 function reverseTripInPlace() {
   const trip = getEditTrip();
   if (!trip) return;
+  snapshotEditTrip();
   trip.waypoints.reverse();
   saveTrips(trips);
   renderWaypointList();
@@ -758,6 +787,7 @@ function saveWaypointModal() {
   if (!trip || !wpModalId) return;
   const wp = trip.waypoints.find(w => w.id === wpModalId);
   if (!wp) return;
+  snapshotEditTrip();
   wp.name = $('#wp-name-input').val().trim();
   wp.desc = $('#wp-desc-input').val().trim();
   saveTrips(trips);
@@ -769,6 +799,7 @@ function saveWaypointModal() {
 function deleteWaypointInModal() {
   const trip = getEditTrip();
   if (!trip || !wpModalId) return;
+  snapshotEditTrip();
   trip.waypoints = trip.waypoints.filter(w => w.id !== wpModalId);
   saveTrips(trips);
   renderWaypointList();
@@ -1698,6 +1729,7 @@ $(function () {
     const trip = getEditTrip();
     if (!trip) return;
     const wp = { id: uid(), lat: e.latlng.lat, lng: e.latlng.lng, name: '', desc: '' };
+    snapshotEditTrip();
     trip.waypoints.push(wp);
     saveTrips(trips);
     renderWaypointList();
@@ -1783,6 +1815,18 @@ $(function () {
   $('#metro-v-scroll').on('mousedown.metroV touchstart.metroV', () => { metroVScrollPaused = true; });
   $(document).on('mouseup.metroV touchend.metroV', () => { metroVScrollPaused = false; });
 
+  // ── Undo (Ctrl+Z) ─────────────────────────────────────────
+  $(document).on('keydown', function (e) {
+    if (!e.ctrlKey && !e.metaKey) return;
+    if (e.key !== 'z' && e.key !== 'Z') return;
+    if (e.shiftKey) return;
+    const tag = document.activeElement && document.activeElement.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    if (mode !== 'edit') return;
+    e.preventDefault();
+    undoEdit();
+  });
+
   // ── Initialise ────────────────────────────────────────────
   populateTripSelector();
   ImportExport.importTripFromUrl();
@@ -1806,5 +1850,15 @@ if (typeof module !== 'undefined') {
     buildMetroLineSvg,
     buildMetroVerticalSvg,
     duplicateTrip,
+    snapshotEditTrip,
+    undoEdit,
+    getEditTrip,
+    get editTripId()        { return editTripId; },
+    set editTripId(v)       { editTripId = v; },
+    get editUndoHistory()   { return editUndoHistory; },
+    set editUndoHistory(v)  { editUndoHistory = v; },
+    get trips()             { return trips; },
+    set trips(v)            { trips = v; },
+    get EDIT_UNDO_LIMIT()   { return EDIT_UNDO_LIMIT; },
   };
 }
