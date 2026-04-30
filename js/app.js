@@ -677,7 +677,7 @@ function renderWaypointList() {
       .append(`<span class="wp-num">${idx + 1}</span>`)
       .append($info)
       .append(`<span class="wp-coords">${wp.lat.toFixed(4)}, ${wp.lng.toFixed(4)}</span>`)
-      .on('click', () => openWaypointModal(wp.id))
+      .on('click', () => { map.flyTo([wp.lat, wp.lng], 16); openWaypointModal(wp.id); })
       .appendTo($list);
   });
 }
@@ -1265,12 +1265,14 @@ function buildMetroLineSvg(layout, positionInfo) {
     }));
 
     // Small "you are here" label
+    /*
     svg.appendChild(el('text', {
       x: px, y: TRACK_Y - DOT_R - 9,
       'text-anchor': 'middle', 'font-size': 8.5,
       fill: '#b45309', 'font-weight': '600',
       'font-family': 'system-ui,sans-serif',
     }, '▼ you'));
+    */
   }
 
   return svg;
@@ -1463,7 +1465,7 @@ function renderMetroVertical(trip, info, segData) {
           if (etaStr) $div.append($('<span class="mv-eta">').text('ETA: ' + etaStr));
         }
       } else if (dist > -WAYPOINT_HERE_THRESHOLD) {
-        $div.append($('<span class="mv-dist here">').text('● here'));
+        //$div.append($('<span class="mv-dist here">').text('● here'));
       }
     } else {
       if (collCumDist[vi] > 0) {
@@ -1479,12 +1481,14 @@ function renderMetroVertical(trip, info, segData) {
   });
 
   // "You are here" label aligned to the position dot
+  /*
   if (posY !== null) {
     $inner.append(
       $('<div class="mv-info-div">').css('top', posY + 'px')
         .append($('<span class="mv-you-label">').text('▶ you are here')),
     );
   }
+  */
 
   $section.removeClass('hidden');
 
