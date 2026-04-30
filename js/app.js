@@ -692,7 +692,6 @@ function openTripEdit(id) {
 
   $('#edit-no-trip-msg').addClass('hidden');
   $('#trip-edit-section').removeClass('hidden');
-  $('#trip-edit-title').text(trip.name || 'Unnamed Trip');
   $('#trip-name-input').val(trip.name || '');
   $('#trip-selector').val(id);
   renderWaypointList();
@@ -1680,7 +1679,6 @@ $(function () {
     const trip = getEditTrip();
     if (!trip) return;
     trip.name = $(this).val().trim();
-    $('#trip-edit-title').text(trip.name || 'Unnamed Trip');
     saveTrips(trips);
     populateTripSelector();
     // Restore selection after repopulating
