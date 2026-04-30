@@ -1000,14 +1000,14 @@ function renderUpcomingWaypoints(trip, positionInfo, routeSpeedMs) {
       const displayName = wp.name || 'Destination';
       const $li = $('<li class="upcoming-item">');
       const $labelGroup = $('<div class="up-label-group">')
-        .append(`<span class="up-name">${displayName}</span>`);
-      if (wp.desc) $labelGroup.append(`<span class="up-desc">${wp.desc}</span>`);
+        .append($('<span class="up-name">').text(displayName));
+      if (wp.desc) $labelGroup.append($('<span class="up-desc">').text(wp.desc));
       $li.append($labelGroup);
       const $statGroup = $('<div class="up-stat-group">')
-        .append(`<span class="up-dist">in ${fmtDist(dist)}</span>`);
+        .append($('<span class="up-dist">').text('in ' + fmtDist(dist)));
       if (routeSpeedMs !== null && routeSpeedMs > 0.5) {
         const etaStr = fmtEta(dist / routeSpeedMs);
-        if (etaStr) $statGroup.append(`<span class="up-eta">ETA: ${etaStr}</span>`);
+        if (etaStr) $statGroup.append($('<span class="up-eta">').text('ETA: ' + etaStr));
       }
       $li.append($statGroup);
       $list.append($li);
