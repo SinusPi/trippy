@@ -686,12 +686,9 @@ function renderEditMap(rezoom=true) {
       icon: wp.name ? new L.Icon.Default() : L.divIcon({ html: `<div class="edit-marker"></div>` }),
     }).addTo(map);
 
-    const tipName = $('<span>').text(wp.name || 'Waypoint ' + (idx + 1)).html();
-    const tipDesc = wp.desc ? '<br>' + $('<span>').text(wp.desc).html() : '';
-    marker.bindTooltip(
-      `<b>${tipName}</b>${tipDesc}`,
-      { permanent: false },
-    );
+    const $tip = $('<div>').append($('<b>').text(wp.name || 'Waypoint ' + (idx + 1)));
+    if (wp.desc) $tip.append($('<br>'), $('<span>').text(wp.desc));
+    marker.bindTooltip($tip.get(0), { permanent: false });
 
     marker.on('dragend', () => {
       const ll = marker.getLatLng();
@@ -733,9 +730,9 @@ function renderWaypointList() {
     const $info = $('<div class="wp-info">').append($name);
     if (wp.desc) $info.append($('<span class="wp-desc">').text(wp.desc));
     $('<li class="wp-item">')
-      .append(`<span class="wp-num">${idx + 1}</span>`)
+      .append($('<span class="wp-num">').text(idx + 1))
       .append($info)
-      .append(`<span class="wp-coords">${wp.lat.toFixed(4)}, ${wp.lng.toFixed(4)}</span>`)
+      .append($('<span class="wp-coords">').text(`${wp.lat.toFixed(4)}, ${wp.lng.toFixed(4)}`))
       .on('click', () => { map.flyTo([wp.lat, wp.lng], 16); openWaypointModal(wp.id); })
       .appendTo($list);
   });
@@ -870,9 +867,10 @@ function renderDriveMap(trip) {
       fillColor:   '#93c5fd',
       fillOpacity: 1,
       weight:      2,
-    }).addTo(map).bindTooltip(
-      `<b>${wp.name || 'WP ' + (idx + 1)}</b>${wp.desc ? '<br>' + wp.desc : ''}`,
-    );
+    }).addTo(map);
+    const $tip = $('<div>').append($('<b>').text(wp.name || 'WP ' + (idx + 1)));
+    if (wp.desc) $tip.append($('<br>'), $('<span>').text(wp.desc));
+    m.bindTooltip($tip.get(0));
     driveWpMarkers.push(m);
   });
 
@@ -888,12 +886,13 @@ function renderDriveMap(trip) {
 function populateTripSelector() {
   const $sel = $('#trip-selector');
   const prevVal = $sel.val();
-  $sel.empty().append('<option value="">-- select a trip --</option>');
+  $sel.empty().append($('<option>').val('').text('-- select a trip --'));
   trips.forEach(trip => {
     const n = trip.waypoints.length;
     $sel.append(
-      `<option value="${trip.id}">${trip.name || 'Unnamed Trip'} ` +
-      `(${n} waypoint${n !== 1 ? 's' : ''})</option>`,
+      $('<option>').val(trip.id).text(
+        `${trip.name || 'Unnamed Trip'} (${n} waypoint${n !== 1 ? 's' : ''})`,
+      ),
     );
   });
   // Restore previous selection if the trip still exists.

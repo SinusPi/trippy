@@ -73,7 +73,7 @@ global.$ = function (arg) {
   [
     'empty', 'append', 'text', 'val', 'addClass', 'removeClass',
     'toggleClass', 'show', 'hide', 'on', 'off', 'css', 'attr', 'prop',
-    'find', 'is', 'closest', 'remove', 'trigger', 'html',
+    'find', 'is', 'closest', 'remove', 'trigger', 'html', 'get',
     'prepend', 'before', 'after', 'appendTo',
   ].forEach(m => { chain[m] = () => chain; });
   chain.length = 0;
