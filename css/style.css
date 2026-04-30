@@ -282,9 +282,13 @@ textarea { resize: vertical; }
   background: var(--bg);
   border-radius: var(--radius);
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
 }
+.up-label-group { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.up-stat-group  { display: flex; flex-direction: column; gap: 1px; align-items: flex-end; flex-shrink: 0; }
 .upcoming-item .up-name { font-weight: 500; font-size: 13px; }
 .upcoming-item .up-dist { font-size: 12px; color: var(--accent); }
 .upcoming-item .up-eta  { font-size: 12px; color: var(--muted); }
