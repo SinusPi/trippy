@@ -155,6 +155,8 @@ textarea { resize: vertical; }
   transition: background 0.15s;
 }
 .icon-btn:hover  { background: var(--bg); }
+.icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.icon-btn:disabled:hover { background: #fff; }
 .icon-btn.danger { border-color: var(--danger); color: var(--danger); }
 .icon-btn.danger:hover { background: #fee2e2; }
 
