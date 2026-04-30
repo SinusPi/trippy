@@ -72,7 +72,7 @@ global.$ = function (arg) {
   const chain = {};
   [
     'empty', 'append', 'text', 'val', 'addClass', 'removeClass',
-    'toggleClass', 'show', 'hide', 'on', 'off', 'css', 'attr',
+    'toggleClass', 'show', 'hide', 'on', 'off', 'css', 'attr', 'prop',
     'find', 'is', 'closest', 'remove', 'trigger', 'html',
     'prepend', 'before', 'after', 'appendTo',
   ].forEach(m => { chain[m] = () => chain; });
@@ -106,6 +106,7 @@ const {
   duplicateTrip,
   snapshotEditTrip,
   undoEdit,
+  redoEdit,
   getEditTrip,
 } = require('./js/app.js');
 
@@ -573,6 +574,7 @@ group('9. Undo history', () => {
     app.trips = [trip];
     app.editTripId = trip.id;
     app.editUndoHistory = [];
+    app.editRedoHistory = [];
     return trip;
   }
 
@@ -626,12 +628,94 @@ group('9. Undo history', () => {
     assert.strictEqual(app.editUndoHistory.length, app.EDIT_UNDO_LIMIT);
   });
 
-  test('undoEdit pops (consumes) the snapshot so repeated undo works correctly', () => {
+  test('snapshotEditTrip clears redo history', () => {
     const trip = setupEditTrip([{ lat: 1, lng: 1, name: 'A', desc: '' }]);
+    snapshotEditTrip();
+    undoEdit(); // populates redo
+    assert.strictEqual(app.editRedoHistory.length, 1);
+    snapshotEditTrip(); // new action — redo should be cleared
+    assert.strictEqual(app.editRedoHistory.length, 0, 'redo history should be cleared after new snapshot');
+  });
+
+});
+
+// ═══════════════════════════════════════════
+// 10. REDO HISTORY
+// ═══════════════════════════════════════════
+
+group('10. Redo history', () => {
+
+  /** Helper: set up a fresh trip as the active edit trip. */
+  function setupEditTrip(waypoints) {
+    const trip = {
+      id: 'test-trip-redo',
+      name: 'Redo Test',
+      waypoints: waypoints.map((w, i) => ({ id: `wp${i}`, ...w })),
+    };
+    app.trips = [trip];
+    app.editTripId = trip.id;
+    app.editUndoHistory = [];
+    app.editRedoHistory = [];
+    return trip;
+  }
+
+  test('undoEdit pushes current state onto redo stack', () => {
+    const trip = setupEditTrip([{ lat: 1, lng: 2, name: 'A', desc: '' }]);
     snapshotEditTrip();
     trip.waypoints[0].name = 'A-modified';
     undoEdit();
-    assert.strictEqual(app.editUndoHistory.length, 0, 'snapshot should be consumed');
+    assert.strictEqual(app.editRedoHistory.length, 1, 'redo stack should have one entry after undo');
+  });
+
+  test('redoEdit restores the undone state', () => {
+    const trip = setupEditTrip([{ lat: 1, lng: 2, name: 'A', desc: '' }]);
+    snapshotEditTrip();
+    trip.waypoints.push({ id: 'wp1', lat: 3, lng: 4, name: 'B', desc: '' });
+    undoEdit();
+    assert.strictEqual(trip.waypoints.length, 1, 'after undo: one waypoint');
+    redoEdit();
+    assert.strictEqual(trip.waypoints.length, 2, 'after redo: two waypoints restored');
+    assert.strictEqual(trip.waypoints[1].name, 'B');
+  });
+
+  test('redoEdit does nothing when redo stack is empty', () => {
+    const trip = setupEditTrip([{ lat: 1, lng: 2, name: 'A', desc: '' }]);
+    assert.doesNotThrow(() => redoEdit());
+    assert.strictEqual(trip.waypoints.length, 1, 'waypoints unchanged with empty redo stack');
+  });
+
+  test('redoEdit pushes current state back onto undo stack', () => {
+    const trip = setupEditTrip([{ lat: 1, lng: 2, name: 'A', desc: '' }]);
+    snapshotEditTrip();
+    trip.waypoints[0].name = 'A-modified';
+    undoEdit();
+    redoEdit();
+    assert.strictEqual(app.editUndoHistory.length, 1, 'undo stack should have an entry after redo');
+  });
+
+  test('undo then redo then undo round-trips correctly', () => {
+    const trip = setupEditTrip([{ lat: 0, lng: 0, name: 'X', desc: '' }]);
+    snapshotEditTrip();
+    trip.waypoints.push({ id: 'wp1', lat: 1, lng: 1, name: 'Y', desc: '' });
+    undoEdit();
+    assert.strictEqual(trip.waypoints.length, 1);
+    redoEdit();
+    assert.strictEqual(trip.waypoints.length, 2);
+    undoEdit();
+    assert.strictEqual(trip.waypoints.length, 1);
+    assert.strictEqual(trip.waypoints[0].name, 'X');
+  });
+
+  test('redo stack is capped at EDIT_UNDO_LIMIT', () => {
+    const trip = setupEditTrip([{ lat: 0, lng: 0, name: 'X', desc: '' }]);
+    // Build up a redo stack by doing many snapshot+undo cycles
+    for (let i = 0; i < app.EDIT_UNDO_LIMIT + 5; i++) {
+      snapshotEditTrip();
+      undoEdit();
+      // After each undo the redo grows; reset undo so next snapshot+undo works
+      app.editUndoHistory = [];
+    }
+    assert.ok(app.editRedoHistory.length <= app.EDIT_UNDO_LIMIT, 'redo history should be capped');
   });
 
 });

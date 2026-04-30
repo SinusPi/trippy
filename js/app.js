@@ -430,6 +430,8 @@ let mode        = 'edit';  // 'edit' | 'drive'
 let editTripId  = null;    // ID of trip currently open in edit mode
 /** Undo history for the current trip being edited (up to EDIT_UNDO_LIMIT snapshots). */
 let editUndoHistory = [];
+/** Redo history for the current trip being edited (up to EDIT_UNDO_LIMIT snapshots). */
+let editRedoHistory = [];
 const EDIT_UNDO_LIMIT = 10;
 /** @type {DriveState|null} */
 let driveState  = null;
@@ -591,7 +593,7 @@ function getEditTrip() {
   return trips.find(t => t.id === editTripId) || null;
 }
 
-/** Push a snapshot of the current trip's waypoints onto the undo stack. */
+/** Push a snapshot of the current trip's waypoints onto the undo stack, clearing redo. */
 function snapshotEditTrip() {
   const trip = getEditTrip();
   if (!trip) return;
@@ -599,6 +601,8 @@ function snapshotEditTrip() {
     waypoints: trip.waypoints.map(w => ({ ...w })),
   });
   if (editUndoHistory.length > EDIT_UNDO_LIMIT) editUndoHistory.shift();
+  editRedoHistory = [];
+  updateUndoRedoButtons();
 }
 
 /** Restore the most recent undo snapshot for the current trip. */
@@ -606,11 +610,39 @@ function undoEdit() {
   if (!editUndoHistory.length) return;
   const trip = getEditTrip();
   if (!trip) return;
+  editRedoHistory.push({
+    waypoints: trip.waypoints.map(w => ({ ...w })),
+  });
+  if (editRedoHistory.length > EDIT_UNDO_LIMIT) editRedoHistory.shift();
   const snapshot = editUndoHistory.pop();
   trip.waypoints = snapshot.waypoints;
   saveTrips(trips);
   renderWaypointList();
   renderEditMap(false);
+  updateUndoRedoButtons();
+}
+
+/** Re-apply the most recently undone change. */
+function redoEdit() {
+  if (!editRedoHistory.length) return;
+  const trip = getEditTrip();
+  if (!trip) return;
+  editUndoHistory.push({
+    waypoints: trip.waypoints.map(w => ({ ...w })),
+  });
+  if (editUndoHistory.length > EDIT_UNDO_LIMIT) editUndoHistory.shift();
+  const snapshot = editRedoHistory.pop();
+  trip.waypoints = snapshot.waypoints;
+  saveTrips(trips);
+  renderWaypointList();
+  renderEditMap(false);
+  updateUndoRedoButtons();
+}
+
+/** Enable or disable the undo/redo toolbar buttons based on history state. */
+function updateUndoRedoButtons() {
+  $('#btn-undo').prop('disabled', editUndoHistory.length === 0);
+  $('#btn-redo').prop('disabled', editRedoHistory.length === 0);
 }
 
 function clearEditLayers() {
@@ -712,6 +744,7 @@ function renderWaypointList() {
 function openTripEdit(id) {
   editTripId = id;
   editUndoHistory = [];
+  editRedoHistory = [];
   const trip = getEditTrip();
   if (!trip) {
     closeTripEdit();
@@ -725,6 +758,7 @@ function openTripEdit(id) {
   $('#trip-selector').val(id);
   renderWaypointList();
   renderEditMap(true); // DO rezoom when opening a trip, to frame all its waypoints nicely
+  updateUndoRedoButtons();
 }
 
 function closeTripEdit() {
@@ -1815,17 +1849,25 @@ $(function () {
   $('#metro-v-scroll').on('mousedown.metroV touchstart.metroV', () => { metroVScrollPaused = true; });
   $(document).on('mouseup.metroV touchend.metroV', () => { metroVScrollPaused = false; });
 
-  // ── Undo (Ctrl+Z) ─────────────────────────────────────────
+  // ── Undo (Ctrl+Z) / Redo (Ctrl+Shift+Z) ──────────────────
   $(document).on('keydown', function (e) {
     if (!e.ctrlKey && !e.metaKey) return;
     if (e.key !== 'z' && e.key !== 'Z') return;
-    if (e.shiftKey) return;
     const tag = document.activeElement && document.activeElement.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA') return;
     if (mode !== 'edit') return;
     e.preventDefault();
-    undoEdit();
+    if (e.shiftKey) {
+      redoEdit();
+    } else {
+      undoEdit();
+    }
   });
+
+  // ── Undo / redo toolbar buttons ───────────────────────────
+  $('#btn-undo').on('click', undoEdit);
+  $('#btn-redo').on('click', redoEdit);
+  updateUndoRedoButtons();
 
   // ── Initialise ────────────────────────────────────────────
   populateTripSelector();
@@ -1852,11 +1894,14 @@ if (typeof module !== 'undefined') {
     duplicateTrip,
     snapshotEditTrip,
     undoEdit,
+    redoEdit,
     getEditTrip,
     get editTripId()        { return editTripId; },
     set editTripId(v)       { editTripId = v; },
     get editUndoHistory()   { return editUndoHistory; },
     set editUndoHistory(v)  { editUndoHistory = v; },
+    get editRedoHistory()   { return editRedoHistory; },
+    set editRedoHistory(v)  { editRedoHistory = v; },
     get trips()             { return trips; },
     set trips(v)            { trips = v; },
     get EDIT_UNDO_LIMIT()   { return EDIT_UNDO_LIMIT; },
