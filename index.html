@@ -45,10 +45,11 @@
 
     <section id="trip-edit-section" class="hidden">
       <div class="section-header">
-        <h2 id="trip-edit-title">Edit Trip</h2>
         <button id="btn-export-trip"    class="icon-btn" title="Share trip URL">📤</button>
         <button id="btn-duplicate-trip" class="icon-btn" title="Duplicate trip">📋</button>
         <button id="btn-reverse-trip"   class="icon-btn" title="Reverse waypoints">🔃</button>
+        <button id="btn-undo"           class="icon-btn" title="Undo (Ctrl+Z)" disabled>↩</button>
+        <button id="btn-redo"           class="icon-btn" title="Redo (Ctrl+Shift+Z)" disabled>↪</button>
         <button id="btn-delete-trip"    class="icon-btn danger" title="Delete trip">🗑</button>
       </div>
 
@@ -97,17 +98,19 @@
       </div>
 
       <div id="progress-card" class="status-card hidden">
-        <div class="stat-row">
-          <span class="label">Along route</span>
-          <span id="stat-progress" class="value">—</span>
-        </div>
-        <div class="stat-row">
-          <span class="label">Remaining</span>
-          <span id="stat-remaining" class="value">—</span>
-        </div>
-        <div class="stat-row">
-          <span class="label">Total length</span>
-          <span id="stat-total" class="value">—</span>
+        <div class="stat-double-row">
+          <div class="stat-cell">
+            <span class="label">Along route</span>
+            <span id="stat-progress" class="value">—</span>
+          </div>
+          <div class="stat-cell">
+            <span class="label">Remaining</span>
+            <span id="stat-remaining" class="value">—</span>
+          </div>
+          <div class="stat-cell">
+            <span class="label">Total length</span>
+            <span id="stat-total" class="value">—</span>
+          </div>
         </div>
         <div class="stat-row">
           <span class="label">Speed</span>

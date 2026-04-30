@@ -428,6 +428,11 @@ function duplicateTrip(trip, newName) {
 let trips       = loadTrips();
 let mode        = 'edit';  // 'edit' | 'drive'
 let editTripId  = null;    // ID of trip currently open in edit mode
+/** Undo history for the current trip being edited (up to EDIT_UNDO_LIMIT snapshots). */
+let editUndoHistory = [];
+/** Redo history for the current trip being edited (up to EDIT_UNDO_LIMIT snapshots). */
+let editRedoHistory = [];
+const EDIT_UNDO_LIMIT = 10;
 /** @type {DriveState|null} */
 let driveState  = null;
 /** @type {'proportional'|'even'|'smart'} */
@@ -588,6 +593,58 @@ function getEditTrip() {
   return trips.find(t => t.id === editTripId) || null;
 }
 
+/** Push a snapshot of the current trip's waypoints onto the undo stack, clearing redo. */
+function snapshotEditTrip() {
+  const trip = getEditTrip();
+  if (!trip) return;
+  editUndoHistory.push({
+    waypoints: trip.waypoints.map(w => ({ ...w })),
+  });
+  if (editUndoHistory.length > EDIT_UNDO_LIMIT) editUndoHistory.shift();
+  editRedoHistory = [];
+  updateUndoRedoButtons();
+}
+
+/** Restore the most recent undo snapshot for the current trip. */
+function undoEdit() {
+  if (!editUndoHistory.length) return;
+  const trip = getEditTrip();
+  if (!trip) return;
+  editRedoHistory.push({
+    waypoints: trip.waypoints.map(w => ({ ...w })),
+  });
+  if (editRedoHistory.length > EDIT_UNDO_LIMIT) editRedoHistory.shift();
+  const snapshot = editUndoHistory.pop();
+  trip.waypoints = snapshot.waypoints;
+  saveTrips(trips);
+  renderWaypointList();
+  renderEditMap(false);
+  updateUndoRedoButtons();
+}
+
+/** Re-apply the most recently undone change. */
+function redoEdit() {
+  if (!editRedoHistory.length) return;
+  const trip = getEditTrip();
+  if (!trip) return;
+  editUndoHistory.push({
+    waypoints: trip.waypoints.map(w => ({ ...w })),
+  });
+  if (editUndoHistory.length > EDIT_UNDO_LIMIT) editUndoHistory.shift();
+  const snapshot = editRedoHistory.pop();
+  trip.waypoints = snapshot.waypoints;
+  saveTrips(trips);
+  renderWaypointList();
+  renderEditMap(false);
+  updateUndoRedoButtons();
+}
+
+/** Enable or disable the undo/redo toolbar buttons based on history state. */
+function updateUndoRedoButtons() {
+  $('#btn-undo').prop('disabled', editUndoHistory.length === 0);
+  $('#btn-redo').prop('disabled', editRedoHistory.length === 0);
+}
+
 function clearEditLayers() {
   editMarkers.forEach(m => map.removeLayer(m));
   editMarkers = [];
@@ -613,6 +670,7 @@ function renderEditMap(rezoom=true) {
       const positionInfo = getPathPositionInfo(e.latlng, trip.waypoints);
       if (!positionInfo) return;
       const wp = { id: uid(), lat: positionInfo.nearestLatLng.lat, lng: positionInfo.nearestLatLng.lng, name: '', desc: '' };
+      snapshotEditTrip();
       trip.waypoints.splice(positionInfo.segIdx + 1, 0, wp);
       saveTrips(trips);
       renderWaypointList();
@@ -637,6 +695,7 @@ function renderEditMap(rezoom=true) {
 
     marker.on('dragend', () => {
       const ll = marker.getLatLng();
+      snapshotEditTrip();
       wp.lat = ll.lat;
       wp.lng = ll.lng;
       saveTrips(trips);
@@ -684,6 +743,8 @@ function renderWaypointList() {
 
 function openTripEdit(id) {
   editTripId = id;
+  editUndoHistory = [];
+  editRedoHistory = [];
   const trip = getEditTrip();
   if (!trip) {
     closeTripEdit();
@@ -692,11 +753,11 @@ function openTripEdit(id) {
 
   $('#edit-no-trip-msg').addClass('hidden');
   $('#trip-edit-section').removeClass('hidden');
-  $('#trip-edit-title').text(trip.name || 'Unnamed Trip');
   $('#trip-name-input').val(trip.name || '');
   $('#trip-selector').val(id);
   renderWaypointList();
   renderEditMap(true); // DO rezoom when opening a trip, to frame all its waypoints nicely
+  updateUndoRedoButtons();
 }
 
 function closeTripEdit() {
@@ -722,6 +783,7 @@ function duplicateTripUI() {
 function reverseTripInPlace() {
   const trip = getEditTrip();
   if (!trip) return;
+  snapshotEditTrip();
   trip.waypoints.reverse();
   saveTrips(trips);
   renderWaypointList();
@@ -758,6 +820,7 @@ function saveWaypointModal() {
   if (!trip || !wpModalId) return;
   const wp = trip.waypoints.find(w => w.id === wpModalId);
   if (!wp) return;
+  snapshotEditTrip();
   wp.name = $('#wp-name-input').val().trim();
   wp.desc = $('#wp-desc-input').val().trim();
   saveTrips(trips);
@@ -769,6 +832,7 @@ function saveWaypointModal() {
 function deleteWaypointInModal() {
   const trip = getEditTrip();
   if (!trip || !wpModalId) return;
+  snapshotEditTrip();
   trip.waypoints = trip.waypoints.filter(w => w.id !== wpModalId);
   saveTrips(trips);
   renderWaypointList();
@@ -1454,28 +1518,31 @@ function renderMetroVertical(trip, info, segData) {
     const isLast     = origIdx === n - 1;
     const $div = $('<div class="mv-info-div">').css('top', dotY[vi] + 'px');
     const displayName = wp.name || (isFirst ? 'Start' : 'Destination');
-    $div.append($('<span class="mv-name">').text(displayName));
+    const $labelGroup = $('<div class="mv-label-group">');
+    $labelGroup.append($('<span class="mv-name">').text(displayName));
+    if (wp.desc) {
+      $labelGroup.append($('<span class="mv-desc">').text(wp.desc));
+    }
+    $div.append($labelGroup);
 
+    const $statGroup = $('<div class="mv-stat-group">');
     if (info) {
       const dist = collCumDist[vi] - info.distAlong;
       if (dist > WAYPOINT_HERE_THRESHOLD) {
-        $div.append($('<span class="mv-dist">').text('in ' + fmtDist(dist)));
+        $statGroup.append($('<span class="mv-dist">').text('in ' + fmtDist(dist)));
         if (routeSpeedMs !== null && routeSpeedMs > MIN_SPEED_FOR_ETA_MPS) {
           const etaStr = fmtEta(dist / routeSpeedMs);
-          if (etaStr) $div.append($('<span class="mv-eta">').text('ETA: ' + etaStr));
+          if (etaStr) $statGroup.append($('<span class="mv-eta">').text('ETA: ' + etaStr));
         }
       } else if (dist > -WAYPOINT_HERE_THRESHOLD) {
-        //$div.append($('<span class="mv-dist here">').text('● here'));
+        //$statGroup.append($('<span class="mv-dist here">').text('● here'));
       }
     } else {
       if (collCumDist[vi] > 0) {
-        $div.append($('<span class="mv-dist">').text(fmtDist(collCumDist[vi]) + ' from start'));
+        $statGroup.append($('<span class="mv-dist">').text(fmtDist(collCumDist[vi]) + ' from start'));
       }
     }
-
-    if (wp.desc) {
-      $div.append($('<span class="mv-desc">').text(wp.desc));
-    }
+    $div.append($statGroup);
 
     $inner.append($div);
   });
@@ -1684,7 +1751,6 @@ $(function () {
     const trip = getEditTrip();
     if (!trip) return;
     trip.name = $(this).val().trim();
-    $('#trip-edit-title').text(trip.name || 'Unnamed Trip');
     saveTrips(trips);
     populateTripSelector();
     // Restore selection after repopulating
@@ -1702,6 +1768,7 @@ $(function () {
     const trip = getEditTrip();
     if (!trip) return;
     const wp = { id: uid(), lat: e.latlng.lat, lng: e.latlng.lng, name: '', desc: '' };
+    snapshotEditTrip();
     trip.waypoints.push(wp);
     saveTrips(trips);
     renderWaypointList();
@@ -1787,6 +1854,26 @@ $(function () {
   $('#metro-v-scroll').on('mousedown.metroV touchstart.metroV', () => { metroVScrollPaused = true; });
   $(document).on('mouseup.metroV touchend.metroV', () => { metroVScrollPaused = false; });
 
+  // ── Undo (Ctrl+Z) / Redo (Ctrl+Shift+Z) ──────────────────
+  $(document).on('keydown', function (e) {
+    if (!e.ctrlKey && !e.metaKey) return;
+    if (e.key !== 'z' && e.key !== 'Z') return;
+    const tag = document.activeElement && document.activeElement.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    if (mode !== 'edit') return;
+    e.preventDefault();
+    if (e.shiftKey) {
+      redoEdit();
+    } else {
+      undoEdit();
+    }
+  });
+
+  // ── Undo / redo toolbar buttons ───────────────────────────
+  $('#btn-undo').on('click', undoEdit);
+  $('#btn-redo').on('click', redoEdit);
+  updateUndoRedoButtons();
+
   // ── Initialise ────────────────────────────────────────────
   populateTripSelector();
   ImportExport.importTripFromUrl();
@@ -1810,5 +1897,18 @@ if (typeof module !== 'undefined') {
     buildMetroLineSvg,
     buildMetroVerticalSvg,
     duplicateTrip,
+    snapshotEditTrip,
+    undoEdit,
+    redoEdit,
+    getEditTrip,
+    get editTripId()        { return editTripId; },
+    set editTripId(v)       { editTripId = v; },
+    get editUndoHistory()   { return editUndoHistory; },
+    set editUndoHistory(v)  { editUndoHistory = v; },
+    get editRedoHistory()   { return editRedoHistory; },
+    set editRedoHistory(v)  { editRedoHistory = v; },
+    get trips()             { return trips; },
+    set trips(v)            { trips = v; },
+    get EDIT_UNDO_LIMIT()   { return EDIT_UNDO_LIMIT; },
   };
 }
