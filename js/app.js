@@ -1452,28 +1452,31 @@ function renderMetroVertical(trip, info, segData) {
     const isLast     = origIdx === n - 1;
     const $div = $('<div class="mv-info-div">').css('top', dotY[vi] + 'px');
     const displayName = wp.name || (isFirst ? 'Start' : 'Destination');
-    $div.append($('<span class="mv-name">').text(displayName));
+    const $labelGroup = $('<div class="mv-label-group">');
+    $labelGroup.append($('<span class="mv-name">').text(displayName));
+    if (wp.desc) {
+      $labelGroup.append($('<span class="mv-desc">').text(wp.desc));
+    }
+    $div.append($labelGroup);
 
+    const $statGroup = $('<div class="mv-stat-group">');
     if (info) {
       const dist = collCumDist[vi] - info.distAlong;
       if (dist > WAYPOINT_HERE_THRESHOLD) {
-        $div.append($('<span class="mv-dist">').text('in ' + fmtDist(dist)));
+        $statGroup.append($('<span class="mv-dist">').text('in ' + fmtDist(dist)));
         if (routeSpeedMs !== null && routeSpeedMs > MIN_SPEED_FOR_ETA_MPS) {
           const etaStr = fmtEta(dist / routeSpeedMs);
-          if (etaStr) $div.append($('<span class="mv-eta">').text('ETA: ' + etaStr));
+          if (etaStr) $statGroup.append($('<span class="mv-eta">').text('ETA: ' + etaStr));
         }
       } else if (dist > -WAYPOINT_HERE_THRESHOLD) {
-        $div.append($('<span class="mv-dist here">').text('● here'));
+        $statGroup.append($('<span class="mv-dist here">').text('● here'));
       }
     } else {
       if (collCumDist[vi] > 0) {
-        $div.append($('<span class="mv-dist">').text(fmtDist(collCumDist[vi]) + ' from start'));
+        $statGroup.append($('<span class="mv-dist">').text(fmtDist(collCumDist[vi]) + ' from start'));
       }
     }
-
-    if (wp.desc) {
-      $div.append($('<span class="mv-desc">').text(wp.desc));
-    }
+    $div.append($statGroup);
 
     $inner.append($div);
   });
