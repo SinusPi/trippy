@@ -214,6 +214,10 @@ textarea { resize: vertical; }
 .stat-row { display: flex; justify-content: space-between; align-items: baseline; }
 .stat-row .label { font-size: 12px; color: var(--muted); }
 .stat-row .value { font-size: 16px; font-weight: 600; }
+.stat-double-row { display: flex; justify-content: space-between; gap: 4px; }
+.stat-cell { display: flex; flex-direction: column; gap: 1px; flex: 1; }
+.stat-cell .label { font-size: 12px; color: var(--muted); }
+.stat-cell .value { font-size: 16px; font-weight: 600; }
 
 /* Progress bar */
 #progress-bar-wrap {
