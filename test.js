@@ -708,14 +708,15 @@ group('10. Redo history', () => {
 
   test('redo stack is capped at EDIT_UNDO_LIMIT', () => {
     const trip = setupEditTrip([{ lat: 0, lng: 0, name: 'X', desc: '' }]);
-    // Build up a redo stack by doing many snapshot+undo cycles
-    for (let i = 0; i < app.EDIT_UNDO_LIMIT + 5; i++) {
+    // Fill the undo stack to the limit, then undo all entries to populate redo
+    for (let i = 0; i < app.EDIT_UNDO_LIMIT; i++) {
       snapshotEditTrip();
-      undoEdit();
-      // After each undo the redo grows; reset undo so next snapshot+undo works
-      app.editUndoHistory = [];
     }
-    assert.ok(app.editRedoHistory.length <= app.EDIT_UNDO_LIMIT, 'redo history should be capped');
+    const undoCount = app.editUndoHistory.length; // should be EDIT_UNDO_LIMIT
+    for (let i = 0; i < undoCount; i++) {
+      undoEdit();
+    }
+    assert.strictEqual(app.editRedoHistory.length, app.EDIT_UNDO_LIMIT, 'redo history should be exactly at the cap');
   });
 
 });
