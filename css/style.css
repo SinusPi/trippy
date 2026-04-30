@@ -408,10 +408,14 @@ textarea { resize: vertical; }
   left: 36px;
   right: 8px;
   display: flex;
-  flex-direction: column;
-  gap: 1px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
   transform: translateY(-50%);
 }
+.mv-label-group { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.mv-stat-group  { display: flex; flex-direction: column; gap: 1px; align-items: flex-end; flex-shrink: 0; }
 .mv-name       { font-size: 13px; font-weight: 500; }
 .mv-dist       { font-size: 11px; color: var(--accent); }
 .mv-dist.here  { color: #b45309; font-weight: 600; }
