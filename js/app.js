@@ -998,14 +998,18 @@ function renderUpcomingWaypoints(trip, positionInfo, routeSpeedMs) {
     const $list = $('#upcoming-list').empty();
     upcoming.forEach(({ i, wp, dist }) => {
       const displayName = wp.name || 'Destination';
-      const $li = $('<li class="upcoming-item">')
-        .append(`<span class="up-name">${displayName}</span>`)
+      const $li = $('<li class="upcoming-item">');
+      const $labelGroup = $('<div class="up-label-group">')
+        .append(`<span class="up-name">${displayName}</span>`);
+      if (wp.desc) $labelGroup.append(`<span class="up-desc">${wp.desc}</span>`);
+      $li.append($labelGroup);
+      const $statGroup = $('<div class="up-stat-group">')
         .append(`<span class="up-dist">in ${fmtDist(dist)}</span>`);
       if (routeSpeedMs !== null && routeSpeedMs > 0.5) {
         const etaStr = fmtEta(dist / routeSpeedMs);
-        if (etaStr) $li.append(`<span class="up-eta">ETA: ${etaStr}</span>`);
+        if (etaStr) $statGroup.append(`<span class="up-eta">ETA: ${etaStr}</span>`);
       }
-      if (wp.desc) $li.append(`<span class="up-desc">${wp.desc}</span>`);
+      $li.append($statGroup);
       $list.append($li);
     });
     $('#upcoming-waypoints').removeClass('hidden');
