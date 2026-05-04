@@ -151,88 +151,185 @@ function saveTrips(trips) {
 
 const ImportExport = (() => {
   /** Pending import data while the import modal is open. */
-  let pendingImport = null;
-
-  /**
-   * Decode a compact (v2) trip object { n, w } into the standard { name, waypoints } shape.
-   */
-  function decodeCompactTrip(compact) {
-    if (!compact || typeof compact.n !== 'string' || !Array.isArray(compact.w)) return null;
-    return {
-      name: compact.n,
-      waypoints: compact.w.map(item => {
-        if (!Array.isArray(item) || item.length < 2) return null;
-        return {
-          lat:  typeof item[0] === 'number' ? item[0] : 0,
-          lng:  typeof item[1] === 'number' ? item[1] : 0,
-          name: typeof item[2] === 'string' ? item[2] : '',
-          desc: typeof item[3] === 'string' ? item[3] : '',
-        };
-      }).filter(Boolean),
-    };
-  }
-
-  /**
-   * Build a compact JSON string for a trip (v2 format).
-   * Waypoints are encoded as arrays [lat, lng, name, desc] to minimise size.
-   * Coordinates are rounded to 5 decimal places (~1 m precision).
-   */
-  function encodeTripCompact(trip) {
-    return JSON.stringify({
-      n: trip.name,
-      w: trip.waypoints.map(wp => [
-        parseFloat(wp.lat.toFixed(5)),
-        parseFloat(wp.lng.toFixed(5)),
-        wp.name || '',
-        wp.desc || '',
-      ]),
-    });
-  }
-
-  /**
-   * Encode a trip as a URL-safe base64url string (v2 compact format).
-   * Produces roughly half the bytes of the old verbose JSON base64 encoding.
-   */
-  function encodeTripForUrl(trip) {
-    const bytes  = new TextEncoder().encode(encodeTripCompact(trip));
-    let binary   = '';
-    bytes.forEach(b => { binary += String.fromCharCode(b); });
-    // base64url: replace '+' → '-', '/' → '_', strip '=' padding
-    return 'v2_' + btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-  }
-
-  /**
-   * Decode a trip from a URL parameter.
-   * Supports the current compact base64url (v2) format and the legacy base64-JSON format.
-   * Returns the parsed { name, waypoints } object, or null on failure.
-   */
-  function decodeTripFromParam(param) {
-    try {
-      if (param.startsWith('v2_')) {
-        // Compact format: base64url-encoded compact JSON
-        const b64    = param.slice(3).replace(/-/g, '+').replace(/_/g, '/');
-        const binary = atob(b64);
-        const bytes  = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-        return decodeCompactTrip(JSON.parse(new TextDecoder().decode(bytes)));
-      }
+  const V1 = {
+    encode: (trip) => {
+      return btoa(JSON.stringify(trip));
+    },
+    decode: (param) => {
       // Legacy format: plain base64-encoded full JSON.
-      // URLSearchParams decodes '+' as space, so restore before calling atob().
       const fixed  = param.replace(/ /g, '+');
       const binary = atob(fixed);
       const bytes  = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
       return JSON.parse(new TextDecoder().decode(bytes));
+    },
+  };
+
+  const V2 = {
+  /**
+   * Build a compact JSON string for a trip (v2 format).
+   * Waypoints are encoded as arrays [lat, lng, name, desc] to minimise size.
+   * Coordinates are rounded to 5 decimal places (~1 m precision).
+   */
+    encode: (trip) => {
+      return JSON.stringify({
+        n: trip.name,
+        w: trip.waypoints.map(wp => [
+          parseFloat(wp.lat.toFixed(5)),
+          parseFloat(wp.lng.toFixed(5)),
+          wp.name || '',
+          wp.desc || '',
+        ]),
+      });
+    },
+    /**
+     * Decode a compact (v2) trip object { n, w } into the standard { name, waypoints } shape.
+     */
+    decode: (param)=>{
+      const b64    = param.slice(3).replace(/-/g, '+').replace(/_/g, '/');
+      const binary = atob(b64);
+      const bytes  = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const compact = JSON.parse(new TextDecoder().decode(bytes));
+      
+      if (!compact || typeof compact.n !== 'string' || !Array.isArray(compact.w)) return null;
+      return {
+        name: compact.n,
+        waypoints: compact.w.map(item => {
+          if (!Array.isArray(item) || item.length < 2) return null;
+          return {
+            lat:  typeof item[0] === 'number' ? item[0] : 0,
+            lng:  typeof item[1] === 'number' ? item[1] : 0,
+            name: typeof item[2] === 'string' ? item[2] : '',
+            desc: typeof item[3] === 'string' ? item[3] : '',
+          };
+        }).filter(Boolean),
+      };
+    }
+  };
+
+  // make a "module" with IIFO
+  const V3 = (() => {
+    /** NEW APPROACH: v3 */
+
+    const base64chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    const scale = 100000;
+
+    // Helper: Int to 5-char Base64
+    const smallIntToB64 = (val) => {
+        let s = "";
+        for (let i = 0; i < 5; i++) {
+            s = base64chars[val % 64] + s;
+            val = Math.floor(val / 64);
+        }
+        return s;
+    };
+
+    // Helper: 5-char Base64 to Int
+    const B64toSmallInt = (s) => {
+        let val = 0;
+        for (let i = 0; i < 5; i++) {
+            val = (val * 64) + base64chars.indexOf(s[i]);
+        }
+        return val;
+    };
+
+    const safeText = (str) => {
+      // We encode ONLY non-alphanumeric/common symbols or the separator
+      return str.replace(/[^a-zA-Z0-9 _-]/g, c => {
+          return "!" + c.charCodeAt(0).toString(16).padStart(2, '0');
+      });
+    }
+
+    const unsafeText = (str) => {
+        return str.replace(/!([0-9a-f]{2})/g, (_, hex) => {
+            return String.fromCharCode(parseInt(hex, 16));
+        });
+    }
+    
+    /** @param {Waypoint} waypoint */
+    function packV3Waypoint(waypoint) {
+        const latEnc = smallIntToB64(Math.round(((waypoint.lat + 360)%360) * scale));
+        const lngEnc = smallIntToB64(Math.round(((waypoint.lng + 360)%360) * scale));
+        
+        // Encode name length as a single Base64 char (Max name length 63)
+        // encode in base64, unicode-safe
+        const safeName = safeText(waypoint.name);
+        const safeDesc = safeText(waypoint.desc);
+        
+        return `${latEnc}${lngEnc}${safeName}.${safeDesc}`;
+    }
+
+    function unpackV3Waypoint(str) {
+      // str is in format: "latEnc(5 chars)lngEnc(5 chars)name.desc"
+      let lat = (B64toSmallInt(str.substring(0, 5)) / scale); if (lat > 180) lat -= 360;
+      let lng = (B64toSmallInt(str.substring(5, 10)) / scale); if (lng > 180) lng -= 360;
+      
+      const name = unsafeText(str.substring(10, str.indexOf('.', 10)));
+      const desc = unsafeText(str.substring(str.indexOf('.', 10) + 1));
+      
+      return { lat: Number(lat.toFixed(5)), lng: Number(lng.toFixed(5)), name, desc };
+    }
+
+    function encodeTripV3(trip) {
+      const points = trip.waypoints.map(packV3Waypoint).join(';');
+      return `v3;${safeText(trip.name)};${points}`;
+    }
+
+    /** @returns {Trip|null} */
+    function decodeTripV3(encoded) {
+      const parts = encoded.split(';');
+      if (parts.length < 3 || parts[0] !== 'v3') return null;
+      const name = unsafeText(parts[1]);
+      const waypoints = parts.slice(2).map(unpackV3Waypoint);
+      return { name, waypoints };
+    }
+
+    return {
+      encode: encodeTripV3,
+      decode: decodeTripV3,
+    };
+  })();
+
+
+  /**
+   * Encode a trip as a URL-safe base64url string (v2 compact format).
+   * Produces roughly half the bytes of the old verbose JSON base64 encoding.
+   */
+  function makeURLsafe(base64EncodedTrip) {
+    // got base64, now make it URL-safe by replacing + with -, / with _, and removing padding = chars
+    return base64EncodedTrip.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+
+  /**
+   * Decode a trip from a URL parameter.
+   * Supports the current compact base64url (v2) format and the legacy base64-JSON format.
+   * @returns {Trip|null}
+   */
+  function decodeTripFromParam(param) {
+    try {
+      if (param.startsWith('v3;')) {
+        // New v3 format: plain-text semicolon-delimited fields with compact waypoint encoding.
+        return V3.decode(param);
+      }
+      if (param.startsWith('v2_')) {
+        // Compact format: base64url-encoded compact JSON
+        return V2.decode(param);
+      }
+      // Legacy format: plain base64-encoded full JSON.
+      // URLSearchParams decodes '+' as space, so restore before calling atob().
+      return V1.decode(param)
     } catch (e) {
       return null;
     }
   }
 
+
   /**
    * Decode a trip from pasted plain text.
    * Accepts the compact v2 JSON format, the legacy full-JSON format, or a
    * full share URL (so users can paste either the text or the URL into the box).
-   * Returns the parsed { name, waypoints } object, or null on failure.
+   * @returns {Trip|null}
    */
   function decodeTripFromText(text) {
     const trimmed = text.trim();
@@ -246,11 +343,10 @@ const ImportExport = (() => {
     }
     // Otherwise try parsing as JSON (compact v2 or legacy).
     try {
-      const obj = JSON.parse(trimmed);
-      if (!obj) return null;
-      if (typeof obj.n === 'string'    && Array.isArray(obj.w))         return decodeCompactTrip(obj);
-      if (typeof obj.name === 'string' && Array.isArray(obj.waypoints)) return obj;
-      return null;
+      let trip = V3.decode(trimmed);
+      if (trip) return trip;
+      trip = V2.decode(trimmed);
+      if (trip) return trip;
     } catch (e) {
       return null;
     }
@@ -259,23 +355,8 @@ const ImportExport = (() => {
   /**
    * Build a shareable URL for the given trip.
    */
-  function buildExportUrl(trip) {
-    return window.location.origin + window.location.pathname + '?trip=' + encodeTripForUrl(trip);
-  }
-
-  /**
-   * Open the share modal for the currently-edited trip, populated with both
-   * the compact share URL and the plain-text compact JSON.
-   */
-  function exportCurrentTrip() {
-    const trip = getEditTrip();
-    if (!trip) return;
-    const url  = buildExportUrl(trip);
-    const text = encodeTripCompact(trip);
-    $('#share-url-input').val(url);
-    $('#share-url-note').toggleClass('hidden', url.length <= 2000);
-    $('#share-text-input').val(text);
-    $('#share-modal').removeClass('hidden');
+  function buildExportUrl(base64EncodedTrip) {
+    return window.location.origin + window.location.pathname + '?trip=' + makeURLsafe(base64EncodedTrip);
   }
 
   /**
@@ -306,51 +387,8 @@ const ImportExport = (() => {
     };
   }
 
-  /**
-   * Check the current URL for a ?trip= parameter.  If found, decode the trip
-   * and open the import-confirmation modal so the user can decide what to do.
-   */
-  function importTripFromUrl() {
-    const params = new URLSearchParams(window.location.search);
-    const encoded = params.get('trip');
-    if (!encoded) return;
-
-    const data = decodeTripFromParam(encoded);
-    if (!data || typeof data.name !== 'string' || !data.name.trim() ||
-        !Array.isArray(data.waypoints) || data.waypoints.length === 0) {
-      alert('Could not read the trip from the URL – the link may be invalid or corrupted.');
-      return;
-    }
-
-    const n = data.waypoints.length;
-    const existing = trips.find(t => t.name === data.name);
-    const renamedTo = uniqueTripName(data.name);
-    pendingImport = { data, existing, renamedTo };
-
-    if (existing) {
-      $('#import-modal-desc').text(
-        `A trip named "${data.name}" (${n} waypoint${n !== 1 ? 's' : ''}) already exists in your list.`
-      );
-      $('#import-modal-add').hide();
-      $('#import-modal-overwrite').show().text(`Overwrite "${existing.name}"`);
-      $('#import-modal-rename').show().text(`Import as "${renamedTo}"`);
-    } else {
-      $('#import-modal-desc').text(
-        `Import trip "${data.name}" with ${n} waypoint${n !== 1 ? 's' : ''}?`
-      );
-      $('#import-modal-add').show();
-      $('#import-modal-overwrite').hide();
-      $('#import-modal-rename').hide();
-    }
-
-    $('#import-modal').removeClass('hidden');
-  }
-
   /** Perform the actual import once the user has confirmed their choice. */
-  function doImport(name, existingId) {
-    const data = pendingImport.data;
-    pendingImport = null;
-
+  function doImport(data, existingId) {
     // Strip the query string from the address bar now that the user has confirmed.
     window.history.replaceState({}, '', window.location.pathname);
 
@@ -358,7 +396,7 @@ const ImportExport = (() => {
       // Overwrite: replace waypoints (and name) of the existing trip, keep its id.
       const existing = trips.find(t => t.id === existingId);
       if (existing) {
-        existing.name = name;
+        existing.name = data.name;
         existing.waypoints = data.waypoints.map(sanitizeWaypoint);
         saveTrips(trips);
         renderTripList();
@@ -370,7 +408,7 @@ const ImportExport = (() => {
     // New trip
     const trip = {
       id:        uid(),
-      name,
+      name:      data.name,
       waypoints: data.waypoints.map(sanitizeWaypoint),
     };
     trips.push(trip);
@@ -380,19 +418,14 @@ const ImportExport = (() => {
   }
 
   return {
-    decodeCompactTrip,
-    encodeTripCompact,
-    encodeTripForUrl,
+    encodeTrip: V3.encode,
     decodeTripFromParam,
     decodeTripFromText,
-    buildExportUrl,
-    exportCurrentTrip,
+    encodeURL: (trip) => buildExportUrl(V3.encode(trip)),
     uniqueTripName,
     sanitizeWaypoint,
     importTripFromUrl,
     doImport,
-    get pendingImport() { return pendingImport; },
-    set pendingImport(val) { pendingImport = val; },
   };
 })();
 
@@ -1568,6 +1601,51 @@ function renderMetroVertical(trip, info, segData) {
   }
 }
 
+/**
+ * Check the current URL for a ?trip= parameter.  If found, decode the trip
+ * and open the import-confirmation modal so the user can decide what to do.
+ */
+function importTripFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const encoded = params.get('trip');
+  if (!encoded) return;
+
+  const data = ImportExport.decodeTripFromParam(encoded);
+  if (!data || typeof data.name !== 'string' || !data.name.trim() ||
+      !Array.isArray(data.waypoints) || data.waypoints.length === 0) {
+    alert('Could not read the trip from the URL – the link may be invalid or corrupted.');
+    return;
+  }
+
+  return confirmImport(data);
+}
+
+function confirmImport(data) {
+  const n = data.waypoints.length;
+  const existing = trips.find(t => t.name === data.name);
+  const renamedTo = ImportExport.uniqueTripName(data.name);
+  $('#import-modal').data('pendingImport', { data, existing, renamedTo });
+
+  if (existing) {
+    $('#import-modal-desc').html(
+      `A trip named "${data.name}" (${n} waypoint${n !== 1 ? 's' : ''}) already exists in your list.<br>The imported trip has the same name and ${n} waypoint${n !== 1 ? 's' : ''}.`
+    );
+    $('#import-modal-add').hide();
+    $('#import-modal-overwrite').show().text(`Overwrite "${existing.name}"`);
+    $('#import-modal-rename').show().text(`Import as "${renamedTo}"`);
+  } else {
+    $('#import-modal-desc').text(
+      `Import trip "${data.name}" with ${n} waypoint${n !== 1 ? 's' : ''}?`
+    );
+    $('#import-modal-add').show();
+    $('#import-modal-overwrite').hide();
+    $('#import-modal-rename').hide();
+  }
+
+  $('#import-modal').removeClass('hidden');
+}
+
+
 
 $(function () {
 
@@ -1623,7 +1701,20 @@ $(function () {
   });
 
   // ── Edit — export trip ────────────────────────────────────
-  $('#btn-export-trip').on('click', ImportExport.exportCurrentTrip);
+  /**
+   * Open the share modal for the currently-edited trip, populated with both
+   * the compact share URL and the plain-text compact JSON.
+   */
+  $('#btn-export-trip').on('click', ()=>{
+    const trip = getEditTrip();
+    if (!trip) return;
+    const url = ImportExport.encodeURL(trip);
+    const text = ImportExport.encodeTrip(trip);
+    $('#share-url-input').val(url);
+    $('#share-url-note').toggleClass('hidden', url.length <= 2000);
+    $('#share-text-input').val(text);
+    $('#share-modal').removeClass('hidden');
+  })
 
   // ── Share modal ───────────────────────────────────────────
   function copyWithFeedback($btn, text, label, $target) {
@@ -1670,28 +1761,7 @@ $(function () {
     }
     $('#import-text-modal').addClass('hidden');
 
-    // Reuse the import confirmation modal.
-    const n         = data.waypoints.length;
-    const existing  = trips.find(t => t.name === data.name);
-    const renamedTo = ImportExport.uniqueTripName(data.name);
-    ImportExport.pendingImport = { data, existing, renamedTo };
-
-    if (existing) {
-      $('#import-modal-desc').text(
-        `A trip named "${data.name}" (${n} waypoint${n !== 1 ? 's' : ''}) already exists in your list.`,
-      );
-      $('#import-modal-add').hide();
-      $('#import-modal-overwrite').show().text(`Overwrite "${existing.name}"`);
-      $('#import-modal-rename').show().text(`Import as "${renamedTo}"`);
-    } else {
-      $('#import-modal-desc').text(
-        `Import trip "${data.name}" with ${n} waypoint${n !== 1 ? 's' : ''}?`,
-      );
-      $('#import-modal-add').show();
-      $('#import-modal-overwrite').hide();
-      $('#import-modal-rename').hide();
-    }
-    $('#import-modal').removeClass('hidden');
+    confirmImport(data);
   });
 
   $('#btn-import-text-cancel').on('click', () => $('#import-text-modal').addClass('hidden'));
@@ -1701,30 +1771,34 @@ $(function () {
   });
 
   // ── Import modal ──────────────────────────────────────────
+  const $modal = $('#import-modal');
   $('#import-modal-add').on('click', () => {
-    if (!ImportExport.pendingImport) return;
-    ImportExport.doImport(ImportExport.pendingImport.data.name, null);
+    if (!$modal.data('pendingImport')) return;
+    ImportExport.doImport($modal.data('pendingImport').data, null);
   });
 
   $('#import-modal-overwrite').on('click', () => {
-    if (!ImportExport.pendingImport || !ImportExport.pendingImport.existing) return;
-    ImportExport.doImport(ImportExport.pendingImport.data.name, ImportExport.pendingImport.existing.id);
+    const pending = $modal.data('pendingImport');
+    if (!pending || !pending.existing) return;
+    ImportExport.doImport(pending.data, pending.existing.id);
   });
 
   $('#import-modal-rename').on('click', () => {
-    if (!ImportExport.pendingImport) return;
-    ImportExport.doImport(ImportExport.pendingImport.renamedTo, null);
+    const pending = $modal.data('pendingImport');
+    if (!pending) return;
+    pending.data.name = pending.renamedTo;
+    ImportExport.doImport(pending.data, null);
   });
 
   $('#import-modal-cancel').on('click', () => {
-    ImportExport.pendingImport = null;
+    $modal.removeData('pendingImport');
     $('#import-modal').addClass('hidden');
   });
 
   // Click outside the import modal box to dismiss
   $('#import-modal').on('click', function (e) {
     if ($(e.target).is('#import-modal')) {
-      ImportExport.pendingImport = null;
+      $modal.removeData('pendingImport');
       $('#import-modal').addClass('hidden');
     }
   });
@@ -1876,7 +1950,7 @@ $(function () {
 
   // ── Initialise ────────────────────────────────────────────
   populateTripSelector();
-  ImportExport.importTripFromUrl();
+  importTripFromUrl();
 });
 
 // ═══════════════════════════════════════════
