@@ -1968,6 +1968,7 @@ if (typeof module !== 'undefined') {
     decodeCompactTrip: ImportExport.decodeCompactTrip,
     encodeTripCompact: ImportExport.encodeTripCompact,
     encodeTripForUrl:  ImportExport.encodeTripForUrl,
+    encodeTripV3:      ImportExport.encodeTrip,
     decodeTripFromParam: ImportExport.decodeTripFromParam,
     decodeTripFromText: ImportExport.decodeTripFromText,
     computeSegmentDistances,

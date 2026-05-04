@@ -44,7 +44,18 @@ function assertClose(a, b, delta, msg) {
 // (must be set before requiring app.js)
 // ═══════════════════════════════════════════
 
-global.turf = require('@turf/turf');
+// @turf/turf full bundle has an ESM conflict in Node; compose the stub from individual CJS packages.
+{
+  const _distance = require('@turf/distance').default;
+  const _npol     = require('@turf/nearest-point-on-line').default;
+  const _helpers  = require('@turf/helpers');
+  global.turf = {
+    distance:           _distance,
+    lineString:         _helpers.lineString,
+    point:              _helpers.point,
+    nearestPointOnLine: _npol,
+  };
+}
 
 global.localStorage = { getItem: () => null, setItem: () => {} };
 
@@ -97,6 +108,7 @@ const {
   decodeCompactTrip,
   encodeTripCompact,
   encodeTripForUrl,
+  encodeTripV3,
   decodeTripFromParam,
   decodeTripFromText,
   computeSegmentDistances,
@@ -285,6 +297,139 @@ group('2. Path import / export', () => {
     assert.strictEqual(decodeCompactTrip(null),      null);
     assert.strictEqual(decodeCompactTrip({}),         null);
     assert.strictEqual(decodeCompactTrip({ n: 'X' }), null);
+  });
+
+});
+
+// ═══════════════════════════════════════════
+// 2b. v3 EXPORT / IMPORT
+// ═══════════════════════════════════════════
+
+group('2b. v3 export / import', () => {
+
+  test('encodeTripV3 produces a v3;-prefixed string', () => {
+    const encoded = encodeTripV3(TRIP_LONDON_PARIS);
+    assert(encoded.startsWith('v3;'), `Expected v3; prefix, got: ${encoded.slice(0, 10)}`);
+  });
+
+  test('encodeTripV3 – second segment is the safe-encoded trip name', () => {
+    const encoded = encodeTripV3(TRIP_LONDON_PARIS);
+    const parts   = encoded.split(';');
+    assert.strictEqual(parts[1], 'London to Paris');
+  });
+
+  test('encodeTripV3 – one semicolon-separated segment per waypoint', () => {
+    const encoded = encodeTripV3(TRIP_LONDON_PARIS);
+    const parts   = encoded.split(';');
+    // parts[0] = "v3", parts[1] = name, parts[2..4] = 3 waypoints
+    assert.strictEqual(parts.length, 5, `Expected 5 parts, got ${parts.length}`);
+  });
+
+  test('encodeTripV3 / decodeTripFromParam round-trip – name preserved', () => {
+    const encoded = encodeTripV3(TRIP_LONDON_PARIS);
+    const decoded = decodeTripFromParam(encoded);
+    assert.strictEqual(decoded.name, TRIP_LONDON_PARIS.name);
+  });
+
+  test('encodeTripV3 / decodeTripFromParam round-trip – waypoint count', () => {
+    const encoded = encodeTripV3(TRIP_LONDON_PARIS);
+    const decoded = decodeTripFromParam(encoded);
+    assert.strictEqual(decoded.waypoints.length, 3);
+  });
+
+  test('encodeTripV3 / decodeTripFromParam round-trip – coordinates within 1 m', () => {
+    const encoded = encodeTripV3(TRIP_LONDON_PARIS);
+    const decoded = decodeTripFromParam(encoded);
+    assertClose(decoded.waypoints[0].lat,  51.5074,  0.00001, 'London lat');
+    assertClose(decoded.waypoints[0].lng,  -0.1278,  0.00001, 'London lng');
+    assertClose(decoded.waypoints[1].lat,  51.0924,  0.00001, 'Folkestone lat');
+    assertClose(decoded.waypoints[1].lng,   1.1697,  0.00001, 'Folkestone lng');
+    assertClose(decoded.waypoints[2].lat,  48.8566,  0.00001, 'Paris lat');
+    assertClose(decoded.waypoints[2].lng,   2.3522,  0.00001, 'Paris lng');
+  });
+
+  test('encodeTripV3 / decodeTripFromParam round-trip – waypoint names and descs', () => {
+    const encoded = encodeTripV3(TRIP_LONDON_PARIS);
+    const decoded = decodeTripFromParam(encoded);
+    assert.strictEqual(decoded.waypoints[0].name, 'London');
+    assert.strictEqual(decoded.waypoints[0].desc, 'Start');
+    assert.strictEqual(decoded.waypoints[1].name, 'Folkestone');
+    assert.strictEqual(decoded.waypoints[1].desc, 'Channel crossing');
+    assert.strictEqual(decoded.waypoints[2].name, 'Paris');
+    assert.strictEqual(decoded.waypoints[2].desc, 'End');
+  });
+
+  test('encodeTripV3 – coordinates are rounded to 5 decimal places', () => {
+    const trip = {
+      name: 'Precision test',
+      waypoints: [{ lat: 51.123456789, lng: -0.123456789, name: 'A', desc: '' }],
+    };
+    const encoded = encodeTripV3(trip);
+    const decoded = decodeTripFromParam(encoded);
+    assertClose(decoded.waypoints[0].lat,  51.12346, 0.000005, 'lat rounded to 5dp');
+    assertClose(decoded.waypoints[0].lng,  -0.12346, 0.000005, 'lng rounded to 5dp');
+  });
+
+  test('encodeTripV3 – special characters in name are safely encoded', () => {
+    const trip = {
+      name: 'München → Zürich',
+      waypoints: [
+        { lat: 48.1375, lng: 11.575,  name: 'München', desc: 'Bavaria; "capital"' },
+        { lat: 47.3769, lng:  8.5417, name: 'Zürich',  desc: '' },
+      ],
+    };
+    const encoded = encodeTripV3(trip);
+    const decoded = decodeTripFromParam(encoded);
+    assert.strictEqual(decoded.name,                    trip.name);
+    assert.strictEqual(decoded.waypoints[0].name, 'München');
+    assert.strictEqual(decoded.waypoints[0].desc, 'Bavaria; "capital"');
+    assert.strictEqual(decoded.waypoints[1].name, 'Zürich');
+  });
+
+  test('decodeTripFromParam – v3 prefix is detected and dispatched correctly', () => {
+    const encoded = encodeTripV3(TRIP_AB);
+    assert(encoded.startsWith('v3;'), 'encoded must start with v3;');
+    const decoded = decodeTripFromParam(encoded);
+    assert.strictEqual(decoded.name,              TRIP_AB.name);
+    assert.strictEqual(decoded.waypoints.length,  2);
+  });
+
+  test('decodeTripFromText – accepts a raw v3 string', () => {
+    const encoded = encodeTripV3(TRIP_AB);
+    const decoded = decodeTripFromText(encoded);
+    assert.strictEqual(decoded.name,             TRIP_AB.name);
+    assert.strictEqual(decoded.waypoints.length, 2);
+  });
+
+  test('decodeTripFromText – accepts a URL with a v3 trip param', () => {
+    const encoded = encodeTripV3(TRIP_LONDON_PARIS);
+    const url     = `https://example.com/app?trip=${encodeURIComponent(encoded)}`;
+    const decoded = decodeTripFromText(url);
+    assert.strictEqual(decoded.name,             TRIP_LONDON_PARIS.name);
+    assert.strictEqual(decoded.waypoints.length, 3);
+  });
+
+  test('decodeTripFromParam – negative and near-180° longitudes round-trip', () => {
+    const trip = {
+      name: 'Extremes',
+      waypoints: [
+        { lat: -33.8688, lng: 151.2093, name: 'Sydney',      desc: '' },
+        { lat:  90,      lng:   0,      name: 'North Pole',  desc: '' },
+        { lat: -90,      lng: 180,      name: 'South edge',  desc: '' },
+      ],
+    };
+    const decoded = decodeTripFromParam(encodeTripV3(trip));
+    assertClose(decoded.waypoints[0].lat, -33.8688,  0.00001, 'Sydney lat');
+    assertClose(decoded.waypoints[0].lng, 151.2093,  0.00001, 'Sydney lng');
+    assertClose(decoded.waypoints[1].lat,  90,       0.00001, 'North Pole lat');
+    assertClose(decoded.waypoints[2].lat, -90,       0.00001, 'South edge lat');
+    assertClose(decoded.waypoints[2].lng, 180,       0.00001, 'South edge lng');
+  });
+
+  test('decodeTripFromParam – malformed v3 string returns null', () => {
+    assert.strictEqual(decodeTripFromParam('v3;'),                null);
+    assert.strictEqual(decodeTripFromParam('v3;JustAName'),       null);
+    assert.strictEqual(decodeTripFromParam('v3;Name;BADINPUT'),   null);
   });
 
 });
