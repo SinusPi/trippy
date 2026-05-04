@@ -298,7 +298,7 @@ const ImportExport = (() => {
    */
   function makeURLsafe(base64EncodedTrip) {
     // got base64, now make it URL-safe by replacing + with -, / with _, and removing padding = chars
-    return base64EncodedTrip.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    return base64EncodedTrip.replace(/\+/g, '-').replace(/\//g, '_').replace(/ /g,"+").replace(/=+$/, '');
   }
 
   /**
