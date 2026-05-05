@@ -208,7 +208,6 @@ const ImportExport = (() => {
     }
   };
 
-  // make a "module" with IIFO
   const V3 = (() => {
     /** NEW APPROACH: v3 */
 
@@ -268,6 +267,7 @@ const ImportExport = (() => {
       return `${latEnc}${lngEnc}${safeName}${safeDesc?'.' + safeDesc : ''}`;
     }
 
+    /** @returns {Waypoint|null} */
     function unpackV3Waypoint(str) {
       // str is in format: "latEnc(5 chars)lngEnc(5 chars)name.desc"
       if (!str || str.length < 10) return null; // invalid format
@@ -280,7 +280,7 @@ const ImportExport = (() => {
           return null;
         }
         const nameDescPart = str.substring(10);
-        let dotIdx = nameDescPart.indexOf('.')
+        let dotIdx = nameDescPart.indexOf('.');
         if (dotIdx === -1) dotIdx = nameDescPart.length; // split on first dot, if any
         const name = unsafeText(nameDescPart.substring(0, dotIdx));
         const desc = unsafeText(nameDescPart.substring(dotIdx + 1));
