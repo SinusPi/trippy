@@ -235,22 +235,29 @@ const ImportExport = (() => {
     };
 
     const safeText = (str) => {
-      // We encode ONLY non-alphanumeric/common symbols or the separator
+      // Encode non-alphanumeric/common symbols using variable-length hex
+      // Characters 0-255: !HH (2 hex digits)
+      // Characters 256+: !xHHHH (4 hex digits with 'x' prefix)
       return str.replace(/[^a-zA-Z0-9 _-]/g, c => {
-          return "!" + c.charCodeAt(0).toString(16).padStart(2, '0');
+          const code = c.charCodeAt(0);
+          if (code <= 255) {
+              return "!" + code.toString(16).padStart(2, '0');
+          } else {
+              return "!x" + code.toString(16).padStart(4, '0');
+          }
       });
     }
 
     const unsafeText = (str) => {
-        return str.replace(/!([0-9a-f]{2})/g, (_, hex) => {
-            return String.fromCharCode(parseInt(hex, 16));
+        return str.replace(/!x([0-9a-f]{4})|!([0-9a-f]{2})/gi, (_, hex4, hex2) => {
+            return String.fromCharCode(parseInt(hex4 || hex2, 16));
         });
     }
     
     /** @param {Waypoint} waypoint */
     function packV3Waypoint(waypoint) {
-        const latEnc = smallIntToB64(Math.round(((waypoint.lat + 360)%360) * scale));
-        const lngEnc = smallIntToB64(Math.round(((waypoint.lng + 360)%360) * scale));
+        const latEnc = smallIntToB64(Math.round(((waypoint.lat + 90)) * scale));
+        const lngEnc = smallIntToB64(Math.round(((waypoint.lng + 180)) * scale));
         
         // Encode name length as a single Base64 char (Max name length 63)
         // encode in base64, unicode-safe
@@ -262,13 +269,26 @@ const ImportExport = (() => {
 
     function unpackV3Waypoint(str) {
       // str is in format: "latEnc(5 chars)lngEnc(5 chars)name.desc"
-      let lat = (B64toSmallInt(str.substring(0, 5)) / scale); if (lat > 180) lat -= 360;
-      let lng = (B64toSmallInt(str.substring(5, 10)) / scale); if (lng > 180) lng -= 360;
+      if (!str || str.length < 10) return null; // invalid format
+      const dotIdx = str.indexOf('.', 10);
+      if (dotIdx === -1) return null; // no separator found
       
-      const name = unsafeText(str.substring(10, str.indexOf('.', 10)));
-      const desc = unsafeText(str.substring(str.indexOf('.', 10) + 1));
-      
-      return { lat: Number(lat.toFixed(5)), lng: Number(lng.toFixed(5)), name, desc };
+      try {
+        let lat = (B64toSmallInt(str.substring(0, 5)) / scale)-90;
+        let lng = (B64toSmallInt(str.substring(5, 10)) / scale)-180;
+        
+        // Validate coordinates are in valid range
+        if (!isFinite(lat) || !isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+          return null;
+        }
+        
+        const name = unsafeText(str.substring(10, dotIdx));
+        const desc = unsafeText(str.substring(dotIdx + 1));
+        
+        return { lat: Number(lat.toFixed(5)), lng: Number(lng.toFixed(5)), name, desc };
+      } catch (e) {
+        return null;
+      }
     }
 
     function encodeTripV3(trip) {
@@ -281,7 +301,8 @@ const ImportExport = (() => {
       const parts = encoded.split(';');
       if (parts.length < 3 || parts[0] !== 'v3') return null;
       const name = unsafeText(parts[1]);
-      const waypoints = parts.slice(2).map(unpackV3Waypoint);
+      const waypoints = parts.slice(2).map(unpackV3Waypoint).filter(Boolean); // filter out null (invalid) waypoints
+      if (waypoints.length === 0) return null; // no valid waypoints
       return { name, waypoints };
     }
 
@@ -344,6 +365,10 @@ const ImportExport = (() => {
     // Otherwise try parsing as JSON (compact v2 or legacy).
     try {
       let trip = V3.decode(trimmed);
+      if (trip) return trip;
+      // Try to parse as JSON object (compact format from encodeTripCompact)
+      const obj = JSON.parse(trimmed);
+      trip = decodeCompactTrip(obj);
       if (trip) return trip;
       trip = V2.decode(trimmed);
       if (trip) return trip;
@@ -417,8 +442,48 @@ const ImportExport = (() => {
     $('#import-modal').addClass('hidden');
   }
 
+  /**
+   * Decode a compact JSON object (from V2.encode) into standard trip format.
+   * @param {object} compact - { n: string, w: Array }
+   * @returns {Trip|null}
+   */
+  function decodeCompactTrip(compact) {
+    if (!compact || typeof compact.n !== 'string' || !Array.isArray(compact.w)) return null;
+    return {
+      name: compact.n,
+      waypoints: compact.w.map(item => {
+        if (!Array.isArray(item) || item.length < 2) return null;
+        return {
+          lat:  typeof item[0] === 'number' ? item[0] : 0,
+          lng:  typeof item[1] === 'number' ? item[1] : 0,
+          name: typeof item[2] === 'string' ? item[2] : '',
+          desc: typeof item[3] === 'string' ? item[3] : '',
+        };
+      }).filter(Boolean),
+    };
+  }
+
+  /**
+   * Encode a trip to URL-safe v2_ format (base64url-encoded compact JSON).
+   * @param {Trip} trip
+   * @returns {string} - v2_ prefixed base64url string
+   */
+  function encodeTripForUrl(trip) {
+    const json = V2.encode(trip);
+    // Convert JSON to base64
+    const bytes = new TextEncoder().encode(json);
+    const binary = String.fromCharCode(...bytes);
+    const b64 = btoa(binary);
+    // Make URL-safe and add v2_ prefix
+    const urlSafe = b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    return 'v2_' + urlSafe;
+  }
+
   return {
     encodeTrip: V3.encode,
+    encodeTripCompact: V2.encode,
+    decodeCompactTrip,
+    encodeTripForUrl,
     decodeTripFromParam,
     decodeTripFromText,
     encodeURL: (trip) => buildExportUrl(V3.encode(trip)),
