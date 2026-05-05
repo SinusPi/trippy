@@ -314,13 +314,38 @@ textarea { resize: vertical; }
   padding: 20px;
   width: 320px;
   max-width: 95vw;
+  max-height: 95vh;
   display: flex;
   flex-direction: column;
   gap: 12px;
   box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+  overflow-y: auto;
+}
+#share-modal .modal-box {
+  width: 600px;
 }
 .modal-box h3 { font-size: 16px; }
 .modal-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* QR Code container */
+#qr-code-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 250px;
+  padding: 12px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  overflow: auto;
+}
+#qr-code {
+  display: inline-block;
+  padding: 8px;
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
 
 /* ===== GPS POSITION MARKER (Leaflet divIcon) ===== */
 .pos-marker {

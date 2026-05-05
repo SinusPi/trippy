@@ -1772,7 +1772,7 @@ $(function () {
   // ── Edit — export trip ────────────────────────────────────
   /**
    * Open the share modal for the currently-edited trip, populated with both
-   * the compact share URL and the plain-text compact JSON.
+   * the compact share URL and the plain-text compact JSON, plus a QR code.
    */
   $('#btn-export-trip').on('click', ()=>{
     const trip = getEditTrip();
@@ -1782,6 +1782,31 @@ $(function () {
     $('#share-url-input').val(url);
     $('#share-url-note').toggleClass('hidden', url.length <= 2000);
     $('#share-text-input').val(text);
+    
+    // Generate QR code with adaptive sizing for large URLs (up to 2KB)
+    $('#qr-code').empty(); // Clear previous QR code
+    new QRCode(document.getElementById('qr-code'), {
+      text: url,
+      width: 400,
+      height: 400,
+      colorDark: '#000000',
+      colorLight: '#ffffff',
+      correctLevel: QRCode.CorrectLevel.H
+    });
+    // clicking the QR code should open the code in fullscreen for easier scanning
+    $('#qr-code').off('click').on('click', function() {
+      const qrWindow = window.open('', '_blank');
+      // make a new hi-res qr code
+      new QRCode(qrWindow.document.body, {
+        text: url,
+        width: 900,
+        height: 900,
+        colorDark: '#000000',
+        colorLight: '#ffffff',
+        correctLevel: QRCode.CorrectLevel.H
+      });
+    });
+    
     $('#share-modal').removeClass('hidden');
   })
 
