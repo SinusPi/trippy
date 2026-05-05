@@ -212,24 +212,25 @@ const ImportExport = (() => {
   const V3 = (() => {
     /** NEW APPROACH: v3 */
 
-    const base64chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    const basechars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    const base = basechars.length;
     const scale = 100000;
 
     // Helper: Int to 5-char Base64
-    const smallIntToB64 = (val) => {
+    const smallIntToBase = (val) => {
         let s = "";
         for (let i = 0; i < 5; i++) {
-            s = base64chars[val % 64] + s;
-            val = Math.floor(val / 64);
+            s = basechars[val % base] + s;
+            val = Math.floor(val / base);
         }
         return s;
     };
 
     // Helper: 5-char Base64 to Int
-    const B64toSmallInt = (s) => {
+    const BaseToSmallInt = (s) => {
         let val = 0;
         for (let i = 0; i < 5; i++) {
-            val = (val * 64) + base64chars.indexOf(s[i]);
+            val = (val * base) + basechars.indexOf(s[i]);
         }
         return val;
     };
@@ -239,51 +240,50 @@ const ImportExport = (() => {
       // Characters 0-255: !HH (2 hex digits)
       // Characters 256+: !xHHHH (4 hex digits with 'x' prefix)
       return str.replace(/[^a-zA-Z0-9 _-]/g, c => {
-          const code = c.charCodeAt(0);
-          if (code <= 255) {
-              return "!" + code.toString(16).padStart(2, '0');
-          } else {
-              return "!x" + code.toString(16).padStart(4, '0');
-          }
+        const code = c.charCodeAt(0);
+        if (code <= 255) {
+          return "!" + code.toString(16).padStart(2, '0');
+        } else {
+          return "!x" + code.toString(16).padStart(4, '0');
+        }
       });
     }
 
     const unsafeText = (str) => {
-        return str.replace(/!x([0-9a-f]{4})|!([0-9a-f]{2})/gi, (_, hex4, hex2) => {
-            return String.fromCharCode(parseInt(hex4 || hex2, 16));
-        });
+      return str.replace(/!x([0-9a-f]{4})|!([0-9a-f]{2})/gi, (_, hex4, hex2) => {
+        return String.fromCharCode(parseInt(hex4 || hex2, 16));
+      });
     }
     
     /** @param {Waypoint} waypoint */
     function packV3Waypoint(waypoint) {
-        const latEnc = smallIntToB64(Math.round(((waypoint.lat + 90)) * scale));
-        const lngEnc = smallIntToB64(Math.round(((waypoint.lng + 180)) * scale));
-        
-        // Encode name length as a single Base64 char (Max name length 63)
-        // encode in base64, unicode-safe
-        const safeName = safeText(waypoint.name);
-        const safeDesc = safeText(waypoint.desc);
-        
-        return `${latEnc}${lngEnc}${safeName}.${safeDesc}`;
+      const latEnc = smallIntToBase(Math.round(((waypoint.lat + 90)) * scale));
+      const lngEnc = smallIntToBase(Math.round(((waypoint.lng + 180)) * scale));
+      
+      // Encode name length as a single Base64 char (Max name length 63)
+      // encode in base64, unicode-safe
+      const safeName = safeText(waypoint.name);
+      const safeDesc = safeText(waypoint.desc);
+      
+      return `${latEnc}${lngEnc}${safeName}${safeDesc?'.' + safeDesc : ''}`;
     }
 
     function unpackV3Waypoint(str) {
       // str is in format: "latEnc(5 chars)lngEnc(5 chars)name.desc"
       if (!str || str.length < 10) return null; // invalid format
-      const dotIdx = str.indexOf('.', 10);
-      if (dotIdx === -1) return null; // no separator found
-      
       try {
-        let lat = (B64toSmallInt(str.substring(0, 5)) / scale)-90;
-        let lng = (B64toSmallInt(str.substring(5, 10)) / scale)-180;
+        let lat = (BaseToSmallInt(str.substring(0, 5)) / scale)-90;
+        let lng = (BaseToSmallInt(str.substring(5, 10)) / scale)-180;
         
         // Validate coordinates are in valid range
         if (!isFinite(lat) || !isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
           return null;
         }
-        
-        const name = unsafeText(str.substring(10, dotIdx));
-        const desc = unsafeText(str.substring(dotIdx + 1));
+        const nameDescPart = str.substring(10);
+        let dotIdx = nameDescPart.indexOf('.')
+        if (dotIdx === -1) dotIdx = nameDescPart.length; // split on first dot, if any
+        const name = unsafeText(nameDescPart.substring(0, dotIdx));
+        const desc = unsafeText(nameDescPart.substring(dotIdx + 1));
         
         return { lat: Number(lat.toFixed(5)), lng: Number(lng.toFixed(5)), name, desc };
       } catch (e) {
