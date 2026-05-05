@@ -147,6 +147,25 @@ const TRIP_AB = {
   ],
 };
 
+// Tokyo → Lima (3 named waypoints)
+const TRIP_TOKYO_LIMA = {
+  name: 'Tokyo to Lima',
+  waypoints: [
+    { lat: 35.6895, lng: 139.6917, name: '東京',     desc: 'Start' },
+    { lat: 0.0000,  lng: -79.0000, name: 'Equator',   desc: 'Crossing' },
+    { lat: -12.0464, lng: -77.0428, name: 'Lima',      desc: 'End' },
+  ],
+};
+
+const TRIP_POLES = {
+  name: 'Extremes',
+  waypoints: [
+    { lat: -33.8688, lng: 151.2093, name: 'Sydney',      desc: '' },
+    { lat:  90,      lng:   0,      name: 'North Pole',  desc: '' },
+    { lat: -90,      lng: 180,      name: 'South Pole',  desc: '' },
+  ],
+};
+
 // Helper: collect SVG child elements by tag from a parent element
 function svgEls(parent, tag) {
   const list = parent.getElementsByTagNameNS('http://www.w3.org/2000/svg', tag);
@@ -230,7 +249,7 @@ group('1. Distance calculations', () => {
 // 2. PATH IMPORT / EXPORT
 // ═══════════════════════════════════════════
 
-group('2. Path import / export', () => {
+group('2a. Path import / export', () => {
 
   test('encodeTripCompact round-trips through decodeCompactTrip', () => {
     const json    = encodeTripCompact(TRIP_LONDON_PARIS);
@@ -297,6 +316,14 @@ group('2. Path import / export', () => {
     assert.strictEqual(decodeCompactTrip(null),      null);
     assert.strictEqual(decodeCompactTrip({}),         null);
     assert.strictEqual(decodeCompactTrip({ n: 'X' }), null);
+  });
+
+  test('decodeTripFromText – unicode characters', () => {
+    const param   = encodeTripForUrl(TRIP_TOKYO_LIMA);
+    const url     = `https://example.com/app?trip=${param}`;
+    const decoded = decodeTripFromText(url);
+    assert.strictEqual(decoded.waypoints.length, 3);
+    assert.strictEqual(decoded.waypoints[0].name, TRIP_TOKYO_LIMA.waypoints[0].name);
   });
 
 });
@@ -410,20 +437,13 @@ group('2b. v3 export / import', () => {
   });
 
   test('decodeTripFromParam – negative and near-180° longitudes round-trip', () => {
-    const trip = {
-      name: 'Extremes',
-      waypoints: [
-        { lat: -33.8688, lng: 151.2093, name: 'Sydney',      desc: '' },
-        { lat:  90,      lng:   0,      name: 'North Pole',  desc: '' },
-        { lat: -90,      lng: 180,      name: 'South edge',  desc: '' },
-      ],
-    };
-    const decoded = decodeTripFromParam(encodeTripV3(trip));
-    assertClose(decoded.waypoints[0].lat, -33.8688,  0.00001, 'Sydney lat');
-    assertClose(decoded.waypoints[0].lng, 151.2093,  0.00001, 'Sydney lng');
-    assertClose(decoded.waypoints[1].lat,  90,       0.00001, 'North Pole lat');
-    assertClose(decoded.waypoints[2].lat, -90,       0.00001, 'South edge lat');
-    assertClose(decoded.waypoints[2].lng, 180,       0.00001, 'South edge lng');
+    const decoded = decodeTripFromParam(encodeTripV3(TRIP_POLES));
+    assertClose(decoded.waypoints[0].lat, TRIP_POLES.waypoints[0].lat, 0.00001, 'Sydney lat');
+    assertClose(decoded.waypoints[0].lng, TRIP_POLES.waypoints[0].lng, 0.00001, 'Sydney lng');
+    assertClose(decoded.waypoints[1].lat, TRIP_POLES.waypoints[1].lat, 0.00001, 'North Pole lat');
+    assertClose(decoded.waypoints[1].lng, TRIP_POLES.waypoints[1].lng, 0.00001, 'North Pole lng');
+    assertClose(decoded.waypoints[2].lat, TRIP_POLES.waypoints[2].lat, 0.00001, 'South Pole lat');
+    assertClose(decoded.waypoints[2].lng, TRIP_POLES.waypoints[2].lng, 0.00001, 'South Pole lng');
   });
 
   test('decodeTripFromParam – malformed v3 string returns null', () => {
@@ -432,13 +452,19 @@ group('2b. v3 export / import', () => {
     assert.strictEqual(decodeTripFromParam('v3;Name;BADINPUT'),   null);
   });
 
+  test('decodeTripFromText – unicode characters', () => {
+    const decoded = decodeTripFromParam(encodeTripV3(TRIP_TOKYO_LIMA));
+    assert.strictEqual(decoded.waypoints.length, 3);
+    assert.strictEqual(decoded.waypoints[0].name, TRIP_TOKYO_LIMA.waypoints[0].name);
+  });
+
 });
 
 // ═══════════════════════════════════════════
 // 3. SVG RENDERINGS
 // ═══════════════════════════════════════════
 
-group('3. SVG renderings – horizontal metro line (buildMetroLineSvg)', () => {
+group('3a. SVG renderings – horizontal metro line (buildMetroLineSvg)', () => {
 
   const SD = computeSegmentDistances(TRIP_LONDON_PARIS.waypoints);
   const layout = computeMetroLayout('even', TRIP_LONDON_PARIS.waypoints, SD.segDists, null);
@@ -512,7 +538,7 @@ group('3. SVG renderings – horizontal metro line (buildMetroLineSvg)', () => {
 
 });
 
-group('3. SVG renderings – vertical metro strip (buildMetroVerticalSvg)', () => {
+group('3b. SVG renderings – vertical metro strip (buildMetroVerticalSvg)', () => {
 
   const SD     = computeSegmentDistances(TRIP_LONDON_PARIS.waypoints);
   const layout = computeMetroLayout('even', TRIP_LONDON_PARIS.waypoints, SD.segDists, null);
@@ -635,7 +661,7 @@ group('3. SVG renderings – vertical metro strip (buildMetroVerticalSvg)', () =
 // 5. DUPLICATE TRIP
 // ═══════════════════════════════════════════
 
-group('5. duplicateTrip', () => {
+group('4. duplicateTrip', () => {
 
   test('waypoints are in the same order as the source', () => {
     const result = duplicateTrip(TRIP_LONDON_PARIS, 'Test copy');
@@ -707,7 +733,7 @@ group('5. duplicateTrip', () => {
 // 9. UNDO HISTORY
 // ═══════════════════════════════════════════
 
-group('9. Undo history', () => {
+group('5a. Undo history', () => {
 
   /** Helper: set up a fresh trip as the active edit trip. */
   function setupEditTrip(waypoints) {
@@ -788,7 +814,7 @@ group('9. Undo history', () => {
 // 10. REDO HISTORY
 // ═══════════════════════════════════════════
 
-group('10. Redo history', () => {
+group('5b. Redo history', () => {
 
   /** Helper: set up a fresh trip as the active edit trip. */
   function setupEditTrip(waypoints) {
